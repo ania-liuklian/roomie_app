@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { api, getToken, setToken, inviteCode, inviteLink, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
 type ModalName = "invite" | "join" | "room" | "chore" | "expense" | "shopping" | null;
@@ -42,131 +43,6 @@ type Settlement = {
 };
 type ShoppingItem = { id: number; roomId: number; title: string; done: boolean; buyerId?: number };
 
-const currentUserId = 1;
-
-const seedMembers: Member[] = [
-  { id: 1, name: "Софія Коваль", initials: "СК", color: "#7d6be8", email: "sofia@roomie.app" },
-  { id: 2, name: "Марко Левченко", initials: "МЛ", color: "#e48670", email: "marko@roomie.app" },
-  { id: 3, name: "Аня Бондар", initials: "АБ", color: "#48a78c", email: "anna@roomie.app" },
-  { id: 4, name: "Тарас Мельник", initials: "ТМ", color: "#d79a3b", email: "taras@roomie.app" },
-  { id: 5, name: "Олена Романюк", initials: "ОР", color: "#5795c9", email: "olena@roomie.app" },
-];
-
-const seedRooms: Room[] = [
-  { id: 1, number: "214", memberIds: [1, 2, 3, 4], accent: "#7063df" },
-  { id: 2, number: "38", memberIds: [1, 5], accent: "#2d9b7d" },
-];
-
-const seedChores: Chore[] = [
-  {
-    id: 1,
-    roomId: 1,
-    title: "Помити підлогу",
-    ownerId: 1,
-    difficulty: 3,
-    due: "Сьогодні, 19:00",
-    status: "active",
-    repeat: "Щотижня",
-    rotation: "rotate",
-    rotationIds: [1, 2, 3, 4],
-  },
-  {
-    id: 2,
-    roomId: 1,
-    title: "Винести сміття",
-    ownerId: 2,
-    difficulty: 1,
-    due: "Сьогодні, 20:00",
-    status: "waiting",
-    repeat: "Щотижня",
-    rotation: "same",
-    rotationIds: [2],
-  },
-  {
-    id: 3,
-    roomId: 1,
-    title: "Прибрати ванну",
-    ownerId: 3,
-    difficulty: 4,
-    due: "Завтра, 18:00",
-    status: "active",
-    repeat: "Щотижня",
-    rotation: "rotate",
-    rotationIds: [1, 3],
-  },
-  {
-    id: 4,
-    roomId: 1,
-    title: "Протерти пил",
-    ownerId: 4,
-    difficulty: 2,
-    due: "П’ятниця",
-    status: "done",
-    repeat: "Один раз",
-    rotation: "same",
-    rotationIds: [4],
-  },
-  {
-    id: 5,
-    roomId: 2,
-    title: "Полити рослини",
-    ownerId: 1,
-    difficulty: 1,
-    due: "Субота",
-    status: "active",
-    repeat: "Щотижня",
-    rotation: "rotate",
-    rotationIds: [1, 5],
-  },
-];
-
-const seedExpenses: Expense[] = [
-  {
-    id: 1,
-    roomId: 1,
-    title: "Побутова хімія",
-    amount: 684,
-    payerId: 1,
-    participantIds: [1, 2, 3, 4],
-    note: "Картка 4441 1144 8023 5571",
-    date: "Сьогодні, 12:40",
-  },
-  {
-    id: 2,
-    roomId: 1,
-    title: "Вода та серветки",
-    amount: 258,
-    payerId: 3,
-    participantIds: [1, 2, 3],
-    note: "",
-    date: "Учора, 18:20",
-  },
-  {
-    id: 3,
-    roomId: 1,
-    title: "Піца на всіх",
-    amount: 432,
-    payerId: 2,
-    participantIds: [1, 2, 4],
-    note: "monobank: 4441 2020 1188 0204",
-    date: "12 травня",
-  },
-];
-
-const seedSettlements: Settlement[] = [
-  { id: 1, roomId: 1, debtorId: 1, creditorId: 3, amount: 86, status: "unpaid" },
-  { id: 2, roomId: 1, debtorId: 1, creditorId: 2, amount: 144, status: "requested" },
-  { id: 3, roomId: 1, debtorId: 2, creditorId: 1, amount: 171, status: "requested" },
-  { id: 4, roomId: 1, debtorId: 4, creditorId: 1, amount: 171, status: "unpaid" },
-];
-
-const seedShopping: ShoppingItem[] = [
-  { id: 1, roomId: 1, title: "Пакети для сміття", done: false },
-  { id: 2, roomId: 1, title: "Засіб для посуду", done: false },
-  { id: 3, roomId: 1, title: "Губки для кухні", done: true, buyerId: 3 },
-  { id: 4, roomId: 2, title: "Фільтри для води", done: false },
-];
-
 const nav: { id: Page; label: string; icon: string }[] = [
   { id: "today", label: "Сьогодні", icon: "spark" },
   { id: "chores", label: "Обов’язки", icon: "tasks" },
@@ -174,14 +50,6 @@ const nav: { id: Page; label: string; icon: string }[] = [
   { id: "shopping", label: "Покупки", icon: "bag" },
   { id: "room", label: "Мешканці", icon: "users" },
 ];
-
-function load<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "") as T;
-  } catch {
-    return fallback;
-  }
-}
 
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -366,23 +234,132 @@ function Modal({
   );
 }
 
+function toMember(user: ApiMember): Member {
+  return { ...user, initials: user.name.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() };
+}
+
+function toRoom(room: ApiRoom): Room {
+  return { id: room.id, number: room.number, accent: room.accent, memberIds: room.member_ids };
+}
+
+function toShoppingItem(item: ApiShoppingItem): ShoppingItem {
+  return { id: item.id, roomId: item.room_id, title: item.title, done: item.done, buyerId: item.buyer_id ?? undefined };
+}
+
+function SessionPanel({ children }: { children: React.ReactNode }) {
+  return <div className="modal-backdrop"><section className="modal">
+    <header><div><h2>Roomie</h2><p>Ваш спільний простір</p></div></header>
+    {children}
+  </section></div>;
+}
+
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
+  const [register, setRegister] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    setError("");
+    try {
+      const email = String(data.get("email")).trim();
+      const password = String(data.get("password"));
+      const result = register
+        ? await api.register(String(data.get("name")).trim(), email, password)
+        : await api.login(email, password);
+      onAuthenticated(result.access_token);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Не вдалося увійти.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <SessionPanel>
+    <form className="form" onSubmit={submit} aria-busy={busy}>
+      <h3>{register ? "Створити акаунт" : "Увійти"}</h3>
+      {inviteCode(window.location.href) && <p>Увійдіть або зареєструйтеся, щоб приєднатися за запрошенням.</p>}
+      {register && <label>Ім’я<input name="name" autoComplete="name" required maxLength={100} disabled={busy} /></label>}
+      <label>Електронна пошта<input name="email" type="email" autoComplete="email" required disabled={busy} /></label>
+      <label>Пароль<input name="password" type="password" minLength={8} required autoComplete={register ? "new-password" : "current-password"} disabled={busy} /></label>
+      {error && <p role="alert">{error}</p>}
+      <button className="primary-button" disabled={busy}>{busy ? "Зачекайте…" : register ? "Зареєструватися" : "Увійти"}</button>
+      <button className="ghost-button" type="button" disabled={busy} onClick={() => { setRegister(!register); setError(""); }}>
+        {register ? "Вже є акаунт? Увійти" : "Немає акаунта? Зареєструватися"}
+      </button>
+    </form>
+  </SessionPanel>;
+}
+
 export default function App() {
+  const [token, setAccessToken] = useState(getToken);
+  const [me, setMe] = useState<Member | null>(null);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const logout = () => { setToken(null); setAccessToken(null); setMe(null); setError(""); };
+
+  useEffect(() => {
+    const expired = () => { setAccessToken(null); setMe(null); };
+    window.addEventListener("roomie:unauthorized", expired);
+    return () => window.removeEventListener("roomie:unauthorized", expired);
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    setMe(null);
+    setError("");
+    api.me(controller.signal).then((user) => {
+      if (!controller.signal.aborted) setMe(toMember(user));
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setError(error.message);
+    });
+    return () => controller.abort();
+  }, [token, retry]);
+
+  if (!token) return <AuthScreen onAuthenticated={(value) => { setToken(value); setAccessToken(value); }} />;
+  if (!me) return <SessionPanel><div className="form">
+    {error ? <><p role="alert">{error}</p><button className="primary-button" onClick={() => setRetry(retry + 1)}>Спробувати ще раз</button></> : <p role="status">Завантаження профілю…</p>}
+    <button className="ghost-button" onClick={logout}>Вийти</button>
+  </div></SessionPanel>;
+  return <ConnectedApp key={token} currentUser={me} onLogout={logout} />;
+}
+
+function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout: () => void }) {
+  const currentUserId = currentUser.id;
   const [page, setPage] = useState<Page>("today");
   const [modal, setModal] = useState<ModalName>(null);
-  const [rooms, setRooms] = useState(() => load("roomie-v2-rooms", seedRooms));
-  const [roomId, setRoomId] = useState(1);
-  const [members, setMembers] = useState(() => load("roomie-v2-members", seedMembers));
-  const [profileName, setProfileName] = useState(
-    () =>
-      load<Member[]>("roomie-v2-members", seedMembers).find((item) => item.id === currentUserId)
-        ?.name || "",
-  );
-  const [chores, setChores] = useState(() => load("roomie-v2-chores", seedChores));
-  const [expenses, setExpenses] = useState(() => load("roomie-v2-expenses", seedExpenses));
-  const [settlements, setSettlements] = useState(() =>
-    load("roomie-v2-settlements", seedSettlements),
-  );
-  const [shopping, setShopping] = useState(() => load("roomie-v2-shopping", seedShopping));
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomId, setRoomId] = useState(0);
+  const [members, setMembers] = useState<Member[]>([currentUser]);
+  const [profileName, setProfileName] = useState(currentUser.name);
+  // Chores and money are connected in subsequent steps; no persisted demo data.
+  const [chores, setChores] = useState<Chore[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [shopping, setShopping] = useState<ShoppingItem[]>([]);
+  const [shoppingRoomId, setShoppingRoomId] = useState(0);
+  const [shoppingLoading, setShoppingLoading] = useState(false);
+  const [shoppingError, setShoppingError] = useState("");
+  const [shoppingReload, setShoppingReload] = useState(0);
+  const [shoppingSaving, setShoppingSaving] = useState(false);
+  const [shoppingFormError, setShoppingFormError] = useState("");
+  const shoppingRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
+  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [roomsError, setRoomsError] = useState("");
+  const [reload, setReload] = useState(0);
+  const [roomLoading, setRoomLoading] = useState(false);
+  const [roomError, setRoomError] = useState("");
+  const [roomReload, setRoomReload] = useState(0);
+  const [invite, setInvite] = useState<{ roomId: number; code: string } | null>(null);
+  const [pendingCode, setPendingCode] = useState(() => inviteCode(window.location.href));
+  const [joinInput, setJoinInput] = useState("");
+  const [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const [previewError, setPreviewError] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [toast, setToast] = useState("");
   const [difficulty, setDifficulty] = useState(3);
@@ -390,23 +367,80 @@ export default function App() {
   const [rotation, setRotation] = useState<"same" | "rotate">("same");
   const [choreFilter, setChoreFilter] = useState<"all" | "mine" | "waiting" | "done">("all");
 
-  useEffect(() => localStorage.setItem("roomie-v2-rooms", JSON.stringify(rooms)), [rooms]);
-  useEffect(() => localStorage.setItem("roomie-v2-members", JSON.stringify(members)), [members]);
-  useEffect(() => localStorage.setItem("roomie-v2-chores", JSON.stringify(chores)), [chores]);
-  useEffect(() => localStorage.setItem("roomie-v2-expenses", JSON.stringify(expenses)), [expenses]);
-  useEffect(
-    () => localStorage.setItem("roomie-v2-settlements", JSON.stringify(settlements)),
-    [settlements],
-  );
-  useEffect(() => localStorage.setItem("roomie-v2-shopping", JSON.stringify(shopping)), [shopping]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setRoomsLoading(true);
+    setRoomsError("");
+    api.rooms(controller.signal).then((items) => {
+      if (controller.signal.aborted) return;
+      const next = items.map(toRoom);
+      setRooms(next);
+      setRoomId((id) => next.some((item) => item.id === id) ? id : next[0]?.id || 0);
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setRoomsError(error.message);
+    }).finally(() => { if (!controller.signal.aborted) setRoomsLoading(false); });
+    return () => controller.abort();
+  }, [reload]);
 
-  const room = rooms.find((item) => item.id === roomId) || rooms[0];
+  useEffect(() => {
+    if (!roomId) return;
+    const controller = new AbortController();
+    setMembers([currentUser]);
+    setInvite(null);
+    setRoomLoading(true);
+    setRoomError("");
+    Promise.all([api.members(roomId, controller.signal), api.invite(roomId, controller.signal)])
+      .then(([people, code]) => {
+        if (controller.signal.aborted) return;
+        setMembers(people.map(toMember));
+        setRooms((items) => items.map((item) => item.id === roomId ? { ...item, memberIds: people.map((person) => person.id) } : item));
+        setInvite({ roomId, code: code.code });
+      }).catch((error: Error) => {
+        if (!controller.signal.aborted) setRoomError(error.message);
+      }).finally(() => { if (!controller.signal.aborted) setRoomLoading(false); });
+    return () => controller.abort();
+  }, [roomId, roomReload, currentUser]);
+
+  useEffect(() => {
+    if (!pendingCode) return;
+    const controller = new AbortController();
+    setModal("join");
+    setPreview(null);
+    setPreviewError("");
+    setPreviewLoading(true);
+    api.previewInvite(pendingCode, controller.signal).then((value) => {
+      if (!controller.signal.aborted) setPreview(value);
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setPreviewError(error.message);
+    }).finally(() => { if (!controller.signal.aborted) setPreviewLoading(false); });
+    return () => controller.abort();
+  }, [pendingCode, previewRetry]);
+
+  useEffect(() => {
+    if (!roomId || page !== "shopping") return;
+    const controller = new AbortController();
+    shoppingRequest.current = { roomId, controller };
+    setShoppingRoomId(roomId);
+    setShopping([]);
+    setShoppingLoading(true);
+    setShoppingSaving(false);
+    setShoppingError("");
+    setShoppingFormError("");
+    setModal((value) => value === "shopping" ? null : value);
+    api.shopping(roomId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setShopping(items.map(toShoppingItem));
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setShoppingError(error.message);
+    }).finally(() => { if (!controller.signal.aborted) setShoppingLoading(false); });
+    return () => { controller.abort(); shoppingRequest.current = null; };
+  }, [roomId, page, shoppingReload]);
+
+  const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", memberIds: [], accent: "#7063df" };
   const roomMembers = members.filter((member) => room.memberIds.includes(member.id));
   const roomChores = chores.filter((chore) => chore.roomId === roomId);
   const roomExpenses = expenses.filter((expense) => expense.roomId === roomId);
   const roomShopping = shopping.filter((item) => item.roomId === roomId);
-  const currentUser = members.find((member) => member.id === currentUserId)!;
-  const inviteUrl = `https://roomie.app/invite/${room.id}-${room.number}`;
+  const inviteUrl = invite?.roomId === roomId ? inviteLink(invite.code) : "";
   const member = (id: number) => members.find((item) => item.id === id) || currentUser;
   const owedByMe = settlements.filter(
     (item) => item.roomId === roomId && item.debtorId === currentUserId && item.status !== "paid",
@@ -438,56 +472,66 @@ export default function App() {
     notify(status === "requested" ? "Запит про оплату надіслано" : "Оплату підтверджено");
   };
 
-  const copyInvite = () => {
-    navigator.clipboard?.writeText(inviteUrl);
-    notify("Посилання скопійовано");
+  const copyInvite = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      notify("Посилання скопійовано");
+    } catch {
+      setActionError("Не вдалося скопіювати. Скопіюйте посилання вручну.");
+    }
   };
 
   const saveProfile = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const name = profileName.trim();
-    if (!name) {
-      notify("Введіть ім’я");
-      return;
-    }
-    setMembers(
-      members.map((item) =>
-        item.id === currentUserId
-          ? {
-              ...item,
-              name,
-              initials: name
-                .split(" ")
-                .map((part) => part[0])
-                .join("")
-                .slice(0, 2)
-                .toUpperCase(),
-            }
-          : item,
-      ),
-    );
-    notify("Ім’я оновлено");
   };
 
-  const createRoom = (event: FormEvent<HTMLFormElement>) => {
+  const openJoin = () => {
+    setActionError("");
+    setPreviewError("");
+    setPendingCode(invite?.roomId === roomId ? invite.code : "");
+    setPreview(null);
+    setPreviewRetry((value) => value + 1);
+    setModal("join");
+  };
+
+  const createRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const number = String(data.get("number"));
-    const newRoom: Room = {
-      id: Date.now(),
-      number,
-      memberIds: [currentUserId],
-      accent: "#7063df",
-    };
-    setRooms([...rooms, newRoom]);
-    setRoomId(newRoom.id);
-    setModal(null);
-    notify(`Кімнату ${number} створено`);
+    if (actionBusy) return;
+    const number = String(new FormData(event.currentTarget).get("number")).trim();
+    if (!number) { setActionError("Введіть номер кімнати."); return; }
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const created = toRoom(await api.createRoom(number));
+      setRooms((items) => [...items, created]);
+      setRoomId(created.id);
+      setModal(null);
+      setPage("room");
+      notify(`Кімнату ${created.number} створено`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Не вдалося створити кімнату.");
+    } finally { setActionBusy(false); }
   };
 
-  const joinRoom = () => {
-    setModal(null);
-    notify(`Ви приєдналися до кімнати ${room.number}`);
+  const joinRoom = async () => {
+    if (!pendingCode || !preview || previewLoading || actionBusy) return;
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const joined = toRoom(await api.joinRoom(pendingCode));
+      setRooms((items) => [...items.filter((item) => item.id !== joined.id), joined]);
+      setRoomId(joined.id);
+      setRoomReload((value) => value + 1);
+      setModal(null);
+      setPendingCode("");
+      setJoinInput("");
+      window.history.replaceState(null, "", import.meta.env.BASE_URL);
+      setPage("room");
+      notify(`Ви приєдналися до кімнати ${joined.number}`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Не вдалося приєднатися.");
+    } finally { setActionBusy(false); }
   };
 
   const addChore = (event: FormEvent<HTMLFormElement>) => {
@@ -546,12 +590,36 @@ export default function App() {
     notify(`Розділено по ${share} ₴`);
   };
 
-  const addShopping = (event: FormEvent<HTMLFormElement>) => {
+  const addShopping = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const title = String(new FormData(event.currentTarget).get("title"));
-    setShopping([...shopping, { id: Date.now(), roomId, title, done: false }]);
-    setModal(null);
-    notify("Додано до списку");
+    const context = shoppingRequest.current;
+    if (!context || context.roomId !== roomId || context.controller.signal.aborted || shoppingSaving) return;
+    const title = String(new FormData(event.currentTarget).get("title")).trim();
+    if (!title) { setShoppingFormError("Введіть назву покупки."); return; }
+    setShoppingSaving(true);
+    setShoppingFormError("");
+    try {
+      const item = await api.addShopping(roomId, title, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      setShopping((items) => [...items, toShoppingItem(item)]);
+      setModal(null);
+      notify("Додано до списку");
+    } catch (error) {
+      if (!context.controller.signal.aborted) setShoppingFormError(error instanceof Error ? error.message : "Не вдалося додати покупку.");
+    } finally { if (!context.controller.signal.aborted) setShoppingSaving(false); }
+  };
+
+  const toggleShopping = async (item: ShoppingItem) => {
+    const context = shoppingRequest.current;
+    if (!context || context.roomId !== item.roomId || context.controller.signal.aborted || shoppingSaving) return;
+    setShoppingSaving(true);
+    setShoppingError("");
+    try {
+      const updated = await api.setShoppingDone(item.roomId, item.id, !item.done, context.controller.signal);
+      if (!context.controller.signal.aborted) setShopping((items) => items.map((row) => row.id === updated.id ? toShoppingItem(updated) : row));
+    } catch (error) {
+      if (!context.controller.signal.aborted) setShoppingError(error instanceof Error ? error.message : "Не вдалося оновити покупку.");
+    } finally { if (!context.controller.signal.aborted) setShoppingSaving(false); }
   };
 
   const titles: Record<Page, { title: string; subtitle: string }> = {
@@ -562,6 +630,77 @@ export default function App() {
     room: { title: `Кімната ${room.number}`, subtitle: "Мешканці, запрошення та налаштування" },
     profile: { title: "Мій профіль", subtitle: "Керуйте своїми даними в Roomie" },
   };
+
+  const closeRoomDialog = () => {
+    if (actionBusy) return;
+    setModal(null);
+    setActionError("");
+    setPendingCode("");
+    setJoinInput("");
+    if (inviteCode(window.location.href)) window.history.replaceState(null, "", import.meta.env.BASE_URL);
+  };
+
+  const roomDialogs = <>
+    {modal === "invite" && <Modal title={`Запросити до кімнати ${room.number}`} note="Поділіться посиланням, щоб додати нового мешканця." onClose={closeRoomDialog}>
+      <div className="invite-modal-content">
+        <span className="modal-illustration"><Icon name="link" size={30} /></span>
+        <h3>Одне посилання — і roomie всередині</h3>
+        <p>Надішліть його в будь-який месенджер.</p>
+        <div className="share-link">
+          <button className="invite-url" onClick={openJoin} disabled={!inviteUrl}>{inviteUrl || "Завантаження посилання…"}</button>
+          <button onClick={copyInvite} disabled={!inviteUrl}><Icon name="copy" size={17} />Скопіювати посилання</button>
+        </div>
+        {roomError && <p role="alert">{roomError}</p>}
+        {actionError && <p role="alert">{actionError}</p>}
+      </div>
+    </Modal>}
+    {modal === "join" && <Modal title={preview ? `Кімната ${preview.number}` : "Приєднатися до кімнати"} note="Відкрийте запрошення або введіть код кімнати." onClose={closeRoomDialog}>
+      <form className="form" onSubmit={(event) => {
+        event.preventDefault();
+        const code = inviteCode(joinInput);
+        if (!code) { setPreviewError("Введіть дійсне посилання або код запрошення."); return; }
+        setActionError("");
+        setPreview(null);
+        setPendingCode(code);
+        setPreviewRetry((value) => value + 1);
+      }}>
+        <label>Посилання або код запрошення<input name="invite" value={joinInput} onChange={(event) => setJoinInput(event.target.value)} disabled={actionBusy} placeholder="Код або посилання Roomie" /></label>
+        <button className="outline-button" disabled={previewLoading || actionBusy || !joinInput.trim()}>Переглянути запрошення</button>
+      </form>
+      <div className="join-preview" aria-busy={previewLoading || actionBusy}>
+        {previewLoading && <p role="status">Завантаження запрошення…</p>}
+        {previewError && <><p role="alert">{previewError}</p>{pendingCode && <button className="ghost-button" disabled={actionBusy} onClick={() => setPreviewRetry((value) => value + 1)}>Спробувати ще раз</button>}</>}
+        {preview && <><h3>Вас запросили жити разом</h3><p>Кімната {preview.number}</p>
+          <p>Після приєднання ви побачите спільні справи, покупки та розрахунки.</p>
+          <button className="primary-button" disabled={actionBusy || previewLoading} onClick={joinRoom}>{actionBusy ? "Приєднання…" : "Приєднатися"}<Icon name="arrow" size={16} /></button>
+        </>}
+        {actionError && <p role="alert">{actionError}</p>}
+      </div>
+    </Modal>}
+    {modal === "room" && <Modal title="Створити нову кімнату" note="Можна мати кілька кімнат і легко перемикатися між ними." onClose={closeRoomDialog}>
+      <form className="form" onSubmit={createRoom} aria-busy={actionBusy}>
+        <label>Номер кімнати<input name="number" required maxLength={12} disabled={actionBusy} placeholder="Наприклад, 305-Б" /></label>
+        {actionError && <p role="alert">{actionError}</p>}
+        <div className="modal-actions">
+          <button type="button" className="outline-button" disabled={actionBusy} onClick={closeRoomDialog}>Скасувати</button>
+          <button className="primary-button" disabled={actionBusy}>{actionBusy ? "Створення…" : "Створити кімнату"}</button>
+        </div>
+      </form>
+    </Modal>}
+  </>;
+
+  if (roomsLoading || roomsError || !rooms.length) return <>
+    <SessionPanel><div className="form">
+      <h3>Вітаємо, {currentUser.name}</h3>
+      {roomsLoading ? <p role="status">Завантаження кімнат…</p> : roomsError ? <><p role="alert">{roomsError}</p><button className="primary-button" onClick={() => setReload((value) => value + 1)}>Спробувати ще раз</button></> : <>
+        <p>Створіть свою першу кімнату або приєднайтеся за запрошенням.</p>
+        <button className="primary-button" onClick={() => { setActionError(""); setModal("room"); }}>Створити кімнату</button>
+        <button className="outline-button" onClick={openJoin}>Приєднатися до кімнати</button>
+      </>}
+      <button className="ghost-button" onClick={onLogout}>Вийти</button>
+    </div></SessionPanel>
+    {roomDialogs}
+  </>;
 
   return (
     <div className="shell">
@@ -592,6 +731,7 @@ export default function App() {
               Створити
             </button>
           </div>
+          <button className="ghost-button" onClick={openJoin}>Приєднатися до кімнати</button>
         </div>
         <nav className="main-nav">
           {nav.map((item) => (
@@ -615,7 +755,7 @@ export default function App() {
           </div>
           <strong>Ще один roomie?</strong>
           <p>Додайте за посиланням.</p>
-          <button onClick={copyInvite}>Скопіювати посилання</button>
+          <button onClick={copyInvite} disabled={!inviteUrl}>Скопіювати посилання</button>
         </div>
         <button
           className={`user-chip ${page === "profile" ? "active" : ""}`}
@@ -637,6 +777,7 @@ export default function App() {
             {titles[page].subtitle && <p>{titles[page].subtitle}</p>}
           </div>
           <div className="top-actions">
+            <button className="ghost-button" onClick={onLogout}><Icon name="logout" size={17} />Вийти</button>
             <button className="circle-button notification">
               <Icon name="bell" />
             </button>
@@ -645,6 +786,10 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {roomLoading && <p className="page" role="status">Завантаження мешканців і запрошення…</p>}
+        {roomError && <div className="page" role="alert"><p>{roomError}</p><button className="outline-button" onClick={() => setRoomReload((value) => value + 1)}>Спробувати ще раз</button></div>}
+        {actionError && !modal && <p className="page" role="alert">{actionError}</p>}
 
         {page === "today" && (
           <div className="page today-page">
@@ -867,30 +1012,23 @@ export default function App() {
                 <span className="overline">СПІЛЬНИЙ СПИСОК</span>
                 <h2 className="inline-title">Потрібно купити:</h2>
               </div>
-              <button className="primary-button" onClick={() => setModal("shopping")}>
+              <button className="primary-button" disabled={shoppingLoading || shoppingRoomId !== roomId || shoppingSaving || !!shoppingError} onClick={() => { setShoppingFormError(""); setModal("shopping"); }}>
                 <Icon name="plus" size={18} />
                 Додати
               </button>
             </div>
-            <section className="surface shopping-board">
-              {roomShopping.map((item) => (
+            <section className="surface shopping-board" aria-busy={shoppingLoading || shoppingSaving}>
+              {(shoppingLoading || shoppingRoomId !== roomId) && <p role="status">Завантаження покупок…</p>}
+              {shoppingRoomId === roomId && shoppingError && <div role="alert"><p>{shoppingError}</p><button className="outline-button" disabled={shoppingSaving} onClick={() => setShoppingReload((value) => value + 1)}>Спробувати ще раз</button></div>}
+              {shoppingRoomId === roomId && !shoppingLoading && !shoppingError && !roomShopping.length && <p>Список покупок порожній.</p>}
+              {shoppingSaving && <p role="status">Збереження…</p>}
+              {shoppingRoomId === roomId && !shoppingLoading && roomShopping.map((item) => (
                 <label className={item.done ? "bought" : ""} key={item.id}>
                   <input
                     type="checkbox"
                     checked={item.done}
-                    onChange={() =>
-                      setShopping(
-                        shopping.map((row) =>
-                          row.id === item.id
-                            ? {
-                                ...row,
-                                done: !row.done,
-                                buyerId: !row.done ? currentUserId : undefined,
-                              }
-                            : row,
-                        ),
-                      )
-                    }
+                    disabled={shoppingSaving}
+                    onChange={() => toggleShopping(item)}
                   />
                   <span className="shopping-check">
                     <Icon name="check" size={15} />
@@ -898,8 +1036,8 @@ export default function App() {
                   <strong>{item.title}</strong>
                   {item.buyerId ? (
                     <span className="buyer">
-                      <Avatar member={member(item.buyerId)} size="xs" />
-                      Купила {member(item.buyerId).name.split(" ")[0]}
+                      <Avatar member={members.find((person) => person.id === item.buyerId) || { id: item.buyerId, name: "Мешканець", initials: "", color: "#7063df", email: "" }} size="xs" />
+                      Купила {members.find((person) => person.id === item.buyerId)?.name.split(" ")[0] || "Мешканець"}
                     </span>
                   ) : (
                     <span className="need">Потрібно купити</span>
@@ -1076,10 +1214,10 @@ export default function App() {
                 <h3>Запросіть за посиланням</h3>
                 <p>Roomie відкриє посилання та одразу зможе приєднатися.</p>
                 <div className="copy-box">
-                  <button className="invite-url" onClick={() => setModal("join")}>
-                    {inviteUrl.replace("https://", "")}
+                  <button className="invite-url" onClick={openJoin}>
+                    {inviteUrl ? inviteUrl.replace(/^https?:\/\//, "") : "Завантаження посилання…"}
                   </button>
-                  <button onClick={copyInvite}>Скопіювати посилання</button>
+                  <button onClick={copyInvite} disabled={!inviteUrl}>Скопіювати посилання</button>
                 </div>
               </aside>
             </div>
@@ -1116,7 +1254,7 @@ export default function App() {
                   >
                     Скасувати
                   </button>
-                  <button className="primary-button">Зберегти зміни</button>
+                  <button className="primary-button" disabled title="Редагування профілю буде доступне незабаром.">Зберегти зміни</button>
                 </div>
               </form>
               <div className="profile-metrics">
@@ -1195,72 +1333,7 @@ export default function App() {
         </div>
       )}
 
-      {modal === "invite" && (
-        <Modal
-          title={`Запросити до кімнати ${room.number}`}
-          note="Поділіться посиланням, щоб додати нового мешканця."
-          onClose={() => setModal(null)}
-        >
-          <div className="invite-modal-content">
-            <span className="modal-illustration">
-              <Icon name="link" size={30} />
-            </span>
-            <h3>Одне посилання — і roomie всередині</h3>
-            <p>Надішліть його в будь-який месенджер.</p>
-            <div className="share-link">
-              <button className="invite-url" onClick={() => setModal("join")}>
-                {inviteUrl.replace("https://", "")}
-              </button>
-              <button onClick={copyInvite}>
-                <Icon name="copy" size={17} />
-                Скопіювати посилання
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {modal === "join" && (
-        <Modal
-          title={`Кімната ${room.number}`}
-          note={`${roomMembers.length} мешканці вже користуються Roomie у цій кімнаті.`}
-          onClose={() => setModal(null)}
-        >
-          <div className="join-preview">
-            <div className="join-members">
-              {roomMembers.slice(0, 4).map((item) => (
-                <Avatar member={item} size="md" key={item.id} />
-              ))}
-            </div>
-            <h3>Вас запросили жити разом</h3>
-            <p>Після приєднання ви побачите спільні справи, покупки та розрахунки.</p>
-            <button className="primary-button" onClick={joinRoom}>
-              Приєднатися <Icon name="arrow" size={16} />
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {modal === "room" && (
-        <Modal
-          title="Створити нову кімнату"
-          note="Можна мати кілька кімнат і легко перемикатися між ними."
-          onClose={() => setModal(null)}
-        >
-          <form className="form" onSubmit={createRoom}>
-            <label>
-              Номер кімнати
-              <input name="number" required maxLength={12} placeholder="Наприклад, 305-Б" />
-            </label>
-            <div className="modal-actions">
-              <button type="button" className="outline-button" onClick={() => setModal(null)}>
-                Скасувати
-              </button>
-              <button className="primary-button">Створити кімнату</button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      {roomDialogs}
 
       {modal === "chore" && (
         <Modal
@@ -1421,17 +1494,18 @@ export default function App() {
       )}
 
       {modal === "shopping" && (
-        <Modal title="Додати покупку" onClose={() => setModal(null)}>
-          <form className="form" onSubmit={addShopping}>
+        <Modal title="Додати покупку" onClose={() => { if (!shoppingSaving) setModal(null); }}>
+          <form className="form" onSubmit={addShopping} aria-busy={shoppingSaving}>
             <label>
               Що потрібно купити?
-              <input name="title" required autoFocus placeholder="Наприклад, паперові рушники" />
+              <input name="title" required maxLength={200} disabled={shoppingSaving} autoFocus placeholder="Наприклад, паперові рушники" />
             </label>
+            {shoppingFormError && <p role="alert">{shoppingFormError}</p>}
             <div className="modal-actions">
-              <button type="button" className="outline-button" onClick={() => setModal(null)}>
+              <button type="button" className="outline-button" disabled={shoppingSaving} onClick={() => setModal(null)}>
                 Скасувати
               </button>
-              <button className="primary-button">Додати до списку</button>
+              <button className="primary-button" disabled={shoppingSaving}>{shoppingSaving ? "Додавання…" : "Додати до списку"}</button>
             </div>
           </form>
         </Modal>
