@@ -1,0 +1,10 @@
+{
+  "description": "Ukrainian roommate app for students to assign and approve chores, rate task difficulty, coordinate shopping, and split shared expenses.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
