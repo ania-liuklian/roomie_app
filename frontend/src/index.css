@@ -4494,6 +4494,11 @@ body {
 .chore-menu button:disabled { opacity: 0.5; cursor: default; }
 
 /* In-app notifications: use the existing bell, palette and button styles. */
+.topbar:has(.notification-dropdown) {
+  /* backdrop-filter creates a stacking context; lift the header, not just its popup. */
+  position: relative;
+  z-index: 70;
+}
 .notification-bell { position: relative; }
 .notification-bell .notification:not(.has-unread)::after { display: none; }
 .notification-dropdown {
