@@ -68,6 +68,9 @@ All paths below have prefix `/api/v1`.
 | GET | `/me` | Authenticated user's safe profile. |
 | PATCH | `/me` | Update own name/color/eye_style/gaze; safe profile response, blank/null/unknown fields rejected. |
 | GET | `/me/stats` | Own room count, completed assigned chores and per-room member workloads. |
+| GET | `/notifications` | Own notifications, newest first; items, total and unread count. |
+| POST | `/notifications/{id}/read` | Mark an owned notification read; repeat calls preserve its timestamp. |
+| POST | `/notifications/read-all` | Mark only the caller's unread notifications read. |
 | POST | `/rooms` | Create room, owner membership and random invite in one transaction (201). Body: `number`, optional hex `accent`. Returns room and `invite_code`. |
 | GET | `/rooms` | Only the authenticated user's rooms. |
 | GET | `/rooms/{room_id}` | Member-only room details and `member_ids`. |
@@ -245,3 +248,40 @@ To test customization before the picker is built, authorize in `/docs` and call 
 ```
 
 Reload the frontend, then inspect header/sidebar/profile, members, chores and money. Reset with `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`. The profile picker now provides the same options with live preview and Save/Cancel; see the frontend README for its browser checklist. No further migration is needed for stage 2.
+
+## Notifications: stage 1 (backend only)
+
+Notifications are in-app database records; no email, push or external messages are sent. The frontend bell is unchanged in this stage.
+
+All routes require a JWT and use prefix `/api/v1`:
+
+- `GET /notifications?limit=50&offset=0` returns `{items, unread_count, total}`. Items are ordered by `created_at DESC, id DESC`. Limit is 1–100; offset is nonnegative. Unread/total counts cover all the caller's records, independent of pagination. Unknown recipient filters cannot change ownership scoping.
+- `POST /notifications/{id}/read` returns the owned notification with `read_at` set. Repeating preserves that timestamp. Missing IDs and other users' IDs both return 404.
+- `POST /notifications/read-all` returns `{updated_count, unread_count: 0}` and changes only the caller's unread records. Repeating safely returns zero updated records. No request body is required for either read action.
+
+Each item includes `id`, `recipient_id`, `actor_id`, safe `actor` profile/avatar, `kind`, `message`, `room_id`, nullable `chore_id`/`expense_id`/`settlement_id`, `created_at` and nullable `read_at`. UTC timestamps are real instants. Generic notification text never contains expense notes, card numbers, passwords or expense descriptions. No request/response bodies or notification contents are logged.
+
+| Kind | Recipients / trigger |
+|---|---|
+| `chore_assigned` | Assignee when a chore is created or actually reassigned; also the next assignee when weekly completion generates an occurrence. |
+| `expense_added` | Selected participants on expense creation; newly added participants on expense edits. Unchanged participants are not notified again. |
+| `repayment_reported` | Creditor when the debtor creates a requested repayment. |
+| `repayment_confirmed` | Debtor when the creditor first confirms receipt. |
+| `room_joined` | Every existing member when a new member joins by invite. |
+
+The actor is always excluded, including self-assigned chores, the paying participant and the joining user. The database also forbids `recipient_id == actor_id`. Events are inserted in the same transaction as the source action, so failures roll back both. Join writes are serialized; repeated/concurrent joins do not notify again. Repeat confirmation or completion calls do not duplicate transition notifications. Renames, unchanged assignments, read actions and merely copying an invite do not create notifications. There is no historical backfill.
+
+Notifications retain their history when a related chore, expense, repayment or room is deleted; SQLite clears the corresponding nullable foreign key. A future frontend should not navigate when that resource ID is null, and must still handle normal room/resource permissions. The actor's safe profile is loaded at read time, so current names/avatars are returned.
+
+### Update an existing dev database
+
+Stop the backend. From `backend`, with the same `DATABASE_URL` as your app (default `sqlite:///./roomie.db`):
+
+```powershell
+.\.venv\Scripts\python -m app.migrate_notifications
+.\.venv\Scripts\python -m uvicorn app.main:create_app --factory --reload
+```
+
+Keep `JWT_SECRET` set as described above. The additive migration creates a backup named `roomie.db-notifications-backup-<timestamp>`, then creates the table/index/constraints if missing. It is repeatable, preserves existing app data and produces no notifications for old actions. Database backups are covered by Git ignore rules. Fresh databases, and startup's missing-table creation, also obtain this table through `create_all`; the explicit migration provides the backup and repeatable upgrade step. It does not replace the earlier avatar migration if that is still needed. This migration has not been run against your dev database automatically.
+
+Run `.\.venv\Scripts\python -m pytest` for all backend tests, or append `tests/test_notifications.py` for notification tests. They cover actor exclusion, every event kind, reassignment/rotation, expense privacy, cross-user isolation, pagination/unread counts, idempotent read/all-read, failed writes, concurrent joins, resource deletion and migration preservation.

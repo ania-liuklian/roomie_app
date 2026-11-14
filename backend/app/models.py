@@ -131,3 +131,21 @@ class ShoppingItem(Timestamps, Base):
     created_by_id = Column(ForeignKey("users.id"), nullable=False)
     completed_at = Column(UTCDateTime)
     __table_args__ = (CheckConstraint("(done = 0 AND buyer_id IS NULL AND completed_at IS NULL) OR (done = 1 AND buyer_id IS NOT NULL AND completed_at IS NOT NULL)"),)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    recipient_id = Column(ForeignKey("users.id"), nullable=False, index=True)
+    actor_id = Column(ForeignKey("users.id"), nullable=False)
+    kind = Column(String(30), nullable=False)
+    room_id = Column(ForeignKey("rooms.id", ondelete="SET NULL"))
+    chore_id = Column(ForeignKey("chores.id", ondelete="SET NULL"))
+    expense_id = Column(ForeignKey("expenses.id", ondelete="SET NULL"))
+    settlement_id = Column(ForeignKey("settlements.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, nullable=False, default=utcnow)
+    read_at = Column(UTCDateTime)
+    __table_args__ = (
+        CheckConstraint("recipient_id != actor_id"),
+        CheckConstraint("kind IN ('chore_assigned','expense_added','repayment_reported','repayment_confirmed','room_joined')"),
+    )

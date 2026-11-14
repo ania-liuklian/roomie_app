@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .database import Base, make_engine, utcnow
 from .models import Chore, Room, RoomInvite, RoomMember, User
 from .schemas import Credentials, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
+from .notifications import install_notifications, notify
 
 
 def create_app(database_url=None, jwt_secret=None):
@@ -179,20 +180,22 @@ def create_app(database_url=None, jwt_secret=None):
 
     @app.post("/api/v1/invites/{code}/join")
     def join(code: str, user: User = Depends(current_user), db: Session = Depends(db_session)):
+        user_id = user.id
+        # Authenticate first, then serialize membership and notification creation.
+        db.rollback()
+        db.execute(text("BEGIN IMMEDIATE"))
         invite = db.scalar(select(RoomInvite).where(RoomInvite.code == code))
         if invite is None:
             raise HTTPException(404, "Invite not found")
         room_id = invite.room_id
-        if db.get(RoomMember, (room_id, user.id)) is None:
-            db.add(RoomMember(room_id=room_id, user_id=user.id))
-            try:
-                db.commit()
-            except IntegrityError:
-                db.rollback()
-                if db.get(RoomMember, (room_id, user.id)) is None:
-                    raise
+        if db.get(RoomMember, (room_id, user_id)) is None:
+            recipients = list(db.scalars(select(RoomMember.user_id).where(RoomMember.room_id == room_id)))
+            db.add(RoomMember(room_id=room_id, user_id=user_id))
+            notify(db, recipients, user_id, "room_joined", room_id)
+            db.commit()
         return room_out(db, db.get(Room, room_id))
 
     from .routes import install_routes
     install_routes(app, sessions, current_user)
+    install_notifications(app, sessions, current_user)
     return app

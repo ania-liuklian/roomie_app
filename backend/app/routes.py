@@ -12,6 +12,7 @@ from .database import utcnow
 from .domain_schemas import ChoreCreate, ChoreEdit, ExpenseCreate, ExpenseEdit, SettlementCreate, ShoppingCreate, ShoppingEdit
 from .models import Chore, ChoreRotationMember, Expense, ExpenseShare, Room, RoomMember, Settlement, ShoppingItem, User
 from .schemas import UserOut
+from .notifications import notify
 
 KYIV = ZoneInfo("Europe/Kyiv")
 
@@ -180,6 +181,7 @@ def install_routes(app, sessions, current_user):
         db.add(chore)
         db.flush()
         set_rotation(db, chore, data.rotation_ids)
+        notify(db, [chore.owner_id], user.id, "chore_assigned", room_id, chore_id=chore.id)
         return chore_out(db, chore)
 
     @router.patch("/chores/{item_id}")
@@ -199,6 +201,8 @@ def install_routes(app, sessions, current_user):
             chore.accepted_at = utcnow() if chore.status == "active" else None
         set_rotation(db, chore, ids)
         db.flush()
+        if chore.owner_id != old_owner:
+            notify(db, [chore.owner_id], user.id, "chore_assigned", room_id, chore_id=chore.id)
         return chore_out(db, chore)
 
     @router.delete("/chores/{item_id}", status_code=204)
@@ -249,6 +253,7 @@ def install_routes(app, sessions, current_user):
                 db.add(successor)
                 db.flush()
                 set_rotation(db, successor, ids)
+                notify(db, [successor.owner_id], user.id, "chore_assigned", room_id, chore_id=successor.id)
             db.flush()
         return chore_out(db, chore)
 
@@ -320,6 +325,7 @@ def install_routes(app, sessions, current_user):
                     for uid, amount in split_equal(data.amount_minor, data.participant_ids).items()])
         db.flush()
         validate_financial_change(db, room_id, {}, protect_paid=False)
+        notify(db, data.participant_ids, user.id, "expense_added", room_id, expense_id=expense.id)
         return expense_out(db, expense)
 
     @router.get("/expenses/{item_id}")
@@ -335,6 +341,7 @@ def install_routes(app, sessions, current_user):
             raise HTTPException(403, "Only the payer can edit expenses")
         _, old_debts, _ = ledger(db, room_id)
         ids = data.participant_ids if data.participant_ids is not None else list(share_map(db, expense.id))
+        old_ids = set(share_map(db, expense.id))
         participants(db, room_id, ids)
         for key, value in data.model_dump(exclude_unset=True, exclude={"participant_ids"}).items():
             setattr(expense, key, value)
@@ -343,6 +350,7 @@ def install_routes(app, sessions, current_user):
                     for uid, amount in split_equal(expense.amount_minor, ids).items()])
         db.flush()
         validate_financial_change(db, room_id, old_debts)
+        notify(db, set(ids) - old_ids, user.id, "expense_added", room_id, expense_id=expense.id)
         return expense_out(db, expense)
 
     @router.delete("/expenses/{item_id}", status_code=204)
@@ -371,6 +379,7 @@ def install_routes(app, sessions, current_user):
         settlement = Settlement(room_id=room_id, debtor_id=user.id, creditor_id=data.creditor_id, amount_minor=data.amount_minor)
         db.add(settlement)
         db.flush()
+        notify(db, [settlement.creditor_id], user.id, "repayment_reported", room_id, settlement_id=settlement.id)
         return columns(settlement)
 
     @router.post("/settlements/{item_id}/confirm")
@@ -386,6 +395,7 @@ def install_routes(app, sessions, current_user):
             check_amount(settlement.amount_minor, debts.get((settlement.debtor_id, settlement.creditor_id), 0), pending)
             settlement.status, settlement.paid_at = "paid", utcnow()
             db.flush()
+            notify(db, [settlement.debtor_id], user.id, "repayment_confirmed", room_id, settlement_id=settlement.id)
         return columns(settlement)
 
     @router.delete("/settlements/{item_id}", status_code=204)
