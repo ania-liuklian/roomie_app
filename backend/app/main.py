@@ -73,8 +73,10 @@ def create_app(database_url=None, jwt_secret=None):
                 "exp": now + timedelta(minutes=30), "iss": "roomie", "aud": "roomie-api"}, secret, algorithm="HS256")}
 
     def require_member(db, room_id, user_id):
-        if db.get(RoomMember, (room_id, user_id)) is None:
+        if db.get(Room, room_id) is None:
             raise HTTPException(404, "Room not found")
+        if db.get(RoomMember, (room_id, user_id)) is None:
+            raise HTTPException(403, "Room membership required")
 
     def room_out(db, room):
         return {"id": room.id, "number": room.number, "accent": room.accent,
@@ -163,4 +165,6 @@ def create_app(database_url=None, jwt_secret=None):
                     raise
         return room_out(db, db.get(Room, room_id))
 
+    from .routes import install_routes
+    install_routes(app, sessions, current_user)
     return app

@@ -81,7 +81,7 @@ def test_rooms_invites_access_and_idempotent_join(client):
     assert room["created_at"].endswith("Z") or room["created_at"].endswith("+00:00")
     assert client.get("/api/v1/rooms", headers=other).json() == []
     for suffix in ["", "/members", "/invite"]:
-        assert client.get(f"/api/v1/rooms/{rid}{suffix}", headers=other).status_code == 404
+        assert client.get(f"/api/v1/rooms/{rid}{suffix}", headers=other).status_code == 403
     preview = client.get(f"/api/v1/invites/{code}")
     assert preview.json() == {"number": "214", "accent": "#7063df"}
     assert client.get(f"/api/v1/rooms/{rid}/invite", headers=owner).json()["code"] == code

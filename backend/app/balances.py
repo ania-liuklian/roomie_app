@@ -40,7 +40,7 @@ def compute_balances(expenses, settlements=()):
 
 
 def validate_settlement(amount_minor, outstanding_minor, pending_minor=0):
-    """Future write handlers must call inside their serialized DB transaction.
+    """Write handlers call this inside their serialized DB transaction.
 
     Creation reserves pending requests; confirmation excludes its own reservation.
     """
