@@ -97,7 +97,7 @@ The money hero displays the backend's signed net balance; the debt sections show
 
 ## Checks
 
-Profile verification: change your name, save, and confirm the sidebar and Members show the saved name; reload to verify persistence. Save submits the name and current stored color. The existing UI has no color picker, so it preserves that color while the API supports updating either field. Failed saves retain the draft and show an error; Cancel restores the last saved name.
+Profile verification: change your name and avatar, save, and confirm the sidebar and Members show the saved profile; reload to verify persistence. Save submits name, color, eye style and gaze together. Failed saves retain the draft and show an error; Cancel restores the last saved name and avatar options.
 
 `GET /me/stats` loads on Profile/Members entry and room changes. It supplies room count, completed assigned chores across the caller's rooms, and per-room unfinished workloads (waiting plus active). Workload bars represent each member's share of that room's unfinished chore count; an empty workload is zero. Test these screens directly without visiting Chores first, then stop the backend to verify stats error/retry states. No unfiltered chore cache remains.
 
@@ -125,7 +125,7 @@ Backend tests use temporary SQLite files and test-only JWT secrets; they do not 
 
 No unused TypeScript bindings remain under the strict unused checks. All seed/business persistence code has been removed from `App.tsx`; auth token storage lives only in `api.ts`.
 
-## Avatar customization: stage 1
+## Avatar customization
 
 `src/Avatar.tsx` is the sole character renderer. It uses SVG for the rounded body and white eyes/dark pupils, at every existing avatar location (including the large profile character and Today greeting). Its default is the same rose/plain/straight look, preserving the previous eye geometry and layout classes. No external images or generated assets are used, and other styling is unchanged.
 
@@ -135,4 +135,14 @@ First migrate an existing backend database using the instructions in `../backend
 
 Test stage 1 using `/docs`: PATCH your authenticated `/me` with `{"color":"#8D9C83","eye_style":"lashes","gaze":"happy"}`, then reload the frontend and inspect avatars across screens. Another room member can reload to see the same settings on chore owners, expense payers/participants and debt cards. Nested API user objects supply appearance even when users are absent from the current member list. Invalid options should return 422. To reset, use `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`.
 
-The picker, swatches, eye/gaze buttons, live draft preview and avatar-specific Save/Cancel integration are deliberately deferred to stage 2. Existing name Save/Cancel continues working and preserves other stored options.
+Stage 2 adds `src/AvatarPicker.tsx` inside the existing profile form: eight palette swatches, plain/lashes toggle and six gaze buttons. All controls support keyboard focus and expose their pressed state. Only picker-scoped styles were added; the surrounding design is unchanged.
+
+The large profile character previews draft choices immediately. Other avatars keep the saved appearance until Save succeeds. Save uses one `PATCH /me` request for the trimmed name and all three avatar options, adopts the server response as the new saved profile, and updates the header/sidebar/member registry. Cancel restores that saved profile and clears any save error. Saving disables the form controls and duplicate submissions; failures retain the draft for retry. Drafts are never stored in browser storage.
+
+Browser checklist:
+
+1. Change each color, eye style and gaze and verify the live preview. Confirm header/sidebar avatars remain unchanged while editing.
+2. Change the name too, then Cancel. Name and all avatar options must revert, with no API write.
+3. Change them again and Save. Header/sidebar and other screens must show the saved avatar/name. Reload to verify persistence.
+4. Make another draft change and Cancel; it must restore the most recent successful save, not the initial login values.
+5. Stop the backend and Save. Verify the error, retained name/appearance draft, and enabled retry/Cancel after the request fails. Restart the backend, retry and verify success.

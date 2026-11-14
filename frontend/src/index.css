@@ -4420,3 +4420,50 @@ body {
   font-size: 8px;
   font-weight: 700;
 }
+
+/* Avatar picker only: existing profile/action styling is preserved. */
+.avatar-picker {
+  display: grid;
+  gap: 14px;
+}
+.avatar-picker fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.avatar-picker legend {
+  margin-bottom: 7px;
+  color: #53352b;
+  font-size: 9px;
+  font-weight: 800;
+}
+.avatar-picker-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.profile-form .avatar-picker button {
+  width: auto;
+}
+.profile-form .avatar-picker .avatar-color-swatch {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  color: #15110f;
+  font-weight: 800;
+}
+.avatar-picker button[aria-pressed="true"] {
+  outline: 2px solid #53352b;
+  outline-offset: 2px;
+}
+.avatar-picker button:focus-visible {
+  outline: 3px solid #53352b;
+  outline-offset: 3px;
+}
+.avatar-picker button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

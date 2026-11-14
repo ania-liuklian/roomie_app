@@ -242,18 +242,19 @@ test("calendar strip uses current Kyiv week across midnight and year boundaries"
 test("profile updates use PATCH /me with name/color; stats are read from the API", async () => {
   const calls = [];
   const controller = new AbortController();
-  const user = { id: 3, name: "Updated Name", color: "#C48F78", email: "user@example.com" };
+  const user = { id: 3, name: "Updated Name", color: "#C48F78", eye_style: "lashes", gaze: "happy", email: "user@example.com" };
   const stats = { room_count: 2, completed_chores: 7, workloads: [{ room_id: 7, members: [{ user_id: 3, unfinished_chores: 2, workload_percent: 50 }] }] };
   setToken("profile-token");
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
     return Response.json(url.endsWith("/stats") ? stats : user);
   };
-  assert.deepEqual(await api.updateMe({ name: user.name, color: user.color }, controller.signal), user);
+  const draft = { name: user.name, color: user.color, eye_style: user.eye_style, gaze: user.gaze };
+  assert.deepEqual(await api.updateMe(draft, controller.signal), user);
   assert.deepEqual(await api.stats(controller.signal), stats);
   assert.equal(calls[0].url, "/api/v1/me");
   assert.equal(calls[0].options.method, "PATCH");
-  assert.deepEqual(JSON.parse(calls[0].options.body), { name: user.name, color: user.color });
+  assert.deepEqual(JSON.parse(calls[0].options.body), draft);
   assert.equal(calls[1].url, "/api/v1/me/stats");
   for (const { options } of calls) {
     assert.equal(options.headers.get("Authorization"), "Bearer profile-token");

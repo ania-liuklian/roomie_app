@@ -212,7 +212,7 @@ Never log expense notes, request/response bodies, passwords or bearer tokens. SQ
 
 Frontend integration is complete for Today, chores, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell and chore dots have no actions. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
 
-`PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. Frontend Save preserves stored avatar settings; the customization picker belongs to avatar stage 2.
+`PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. The frontend profile picker previews a local draft and submits name and avatar options together through the existing Save button.
 
 `GET /me/stats` returns `{room_count, completed_chores, workloads: [{room_id, members: [{user_id, unfinished_chores, workload_percent}]}]}`. Counts include only rooms the caller belongs to; completed count covers their own assigned completed occurrences, and unfinished workload includes waiting/active occurrences assigned to each current member. Bar percentages are each member's fraction of the room's unfinished count, rounded to whole percentages; empty rooms return zero percentages. The endpoint reads a consistent SQLite snapshot and does not expose other rooms. No frontend chore cache is used for these metrics.
 
@@ -241,4 +241,4 @@ To test customization before the picker is built, authorize in `/docs` and call 
 {"color":"#8D9C83","eye_style":"lashes","gaze":"sleepy"}
 ```
 
-Reload the frontend, then inspect header/sidebar/profile, members, chores and money. Reset with `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`. The profile picker, live draft preview and avatar Cancel behavior remain stage 2.
+Reload the frontend, then inspect header/sidebar/profile, members, chores and money. Reset with `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`. The profile picker now provides the same options with live preview and Save/Cancel; see the frontend README for its browser checklist. No further migration is needed for stage 2.

@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday } from "./api";
 import { money } from "./money";
-import Avatar, { type AvatarOptions } from "./Avatar";
+import Avatar, { avatarOptions, type AvatarOptions } from "./Avatar";
+import AvatarPicker from "./AvatarPicker";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
 type ModalName = "invite" | "join" | "room" | "chore" | "expense" | "shopping" | null;
@@ -330,6 +331,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   const [roomId, setRoomId] = useState(0);
   const [members, setMembers] = useState<Member[]>([currentUser]);
   const [profileName, setProfileName] = useState(currentUser.name);
+  const [profileAvatar, setProfileAvatar] = useState(() => avatarOptions(currentUser));
   const [todayResult, setTodayResult] = useState<{ roomId: number; data: ApiToday } | null>(null);
   const [todayLoading, setTodayLoading] = useState(false);
   const [todaySaving, setTodaySaving] = useState(false);
@@ -393,7 +395,10 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   const [rotation, setRotation] = useState<"same" | "rotate">("same");
   const [choreFilter, setChoreFilter] = useState<"all" | "mine" | "waiting" | "done">("all");
 
-  useEffect(() => { setProfileName(currentUser.name); }, [currentUser.name]);
+  useEffect(() => {
+    setProfileName(currentUser.name);
+    setProfileAvatar(avatarOptions(currentUser));
+  }, [currentUser.name, currentUser.color, currentUser.eye_style, currentUser.gaze]);
 
   useEffect(() => {
     if (page !== "profile") return;
@@ -601,9 +606,11 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setProfileSaving(true);
     setProfileError("");
     try {
-      const user = await api.updateMe({ name, color: currentUser.color }, controller.signal);
+      const user = await api.updateMe({ name, ...profileAvatar }, controller.signal);
       if (controller.signal.aborted) return;
       onProfileSaved(user);
+      setProfileName(user.name);
+      setProfileAvatar(avatarOptions(user));
       setMembers((items) => items.map((item) => item.id === user.id ? toMember(user) : item));
       notify("Профіль збережено");
     } catch (error) {
@@ -1406,7 +1413,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
           <div className="page profile-layout">
             <section className="surface profile-main">
               <div className="profile-roomie-card">
-                <Avatar member={currentUser} variant="profile" />
+                <Avatar member={{ ...currentUser, ...profileAvatar, name: profileName || currentUser.name }} variant="profile" />
               </div>
               <form className="profile-form" onSubmit={saveProfile} aria-busy={profileSaving}>
                 <label>
@@ -1418,12 +1425,13 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                     placeholder="Введіть ім’я"
                   />
                 </label>
+                <AvatarPicker value={profileAvatar} onChange={setProfileAvatar} disabled={profileSaving} />
                 <div>
                   <button
                     type="button"
                     className="outline-button"
                     disabled={profileSaving}
-                    onClick={() => setProfileName(currentUser.name)}
+                    onClick={() => { setProfileName(currentUser.name); setProfileAvatar(avatarOptions(currentUser)); setProfileError(""); }}
                   >
                     Скасувати
                   </button>
