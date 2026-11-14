@@ -40,7 +40,9 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
       401: authenticated ? "Сесія завершилася. Увійдіть знову." : "Невірна пошта або пароль.",
       403: "Немає доступу до цієї кімнати.",
       404: "Кімнату, запрошення або запис не знайдено.",
-      409: path === "/auth/register" ? "Ця електронна пошта вже зареєстрована." : "Дані змінилися. Оновіть сторінку та спробуйте ще раз.",
+      409: path === "/auth/register" ? "Ця електронна пошта вже зареєстрована."
+        : path.includes("/settlements") ? "Сума перевищує поточний борг або вже очікує підтвердження. Оновіть баланс."
+        : "Дані змінилися. Оновіть сторінку та спробуйте ще раз.",
       422: path.startsWith("/auth/") ? "Перевірте введені дані. Пароль: щонайменше 8 символів, до 72 байтів UTF-8." : "Перевірте введені дані та спробуйте ще раз.",
     };
     throw new ApiError(response.status, messages[response.status] || "Не вдалося виконати дію. Спробуйте ще раз.");
@@ -58,6 +60,22 @@ export type ApiChore = {
   repeat: "once" | "weekly"; rotation: "same" | "rotate"; rotation_ids: number[];
 };
 export type ChoreCreate = Omit<ApiChore, "id" | "room_id" | "status">;
+export type ApiExpense = {
+  id: number; room_id: number; title: string; amount_minor: number; payer_id: number;
+  participant_ids: number[]; shares: { user_id: number; share_minor: number }[];
+  note: string; occurred_at: string;
+};
+export type ApiSettlement = {
+  id: number; room_id: number; debtor_id: number; creditor_id: number; amount_minor: number;
+  status: "requested" | "paid"; requested_at: string; paid_at: string | null;
+};
+export type ApiDebt = { debtor_id: number; creditor_id: number; amount_minor: number; requested_minor: number; status: "unpaid" | "requested" };
+export type ApiMoney = {
+  balances: { user_id: number; balance_minor: number }[]; debts: ApiDebt[];
+  owed_by_me: ApiDebt[]; owed_to_me: ApiDebt[];
+  total_i_owe_minor: number; total_owed_to_me_minor: number; my_balance_minor: number;
+  settlements: ApiSettlement[];
+};
 export type ApiShoppingItem = {
   id: number; room_id: number; title: string; done: boolean;
   buyer_id: number | null; completed_at: string | null;
@@ -88,6 +106,14 @@ export const api = {
   chores: (roomId: number, filter: ChoreFilter = "all", signal?: AbortSignal) => request<ApiChore[]>(`/rooms/${roomId}/chores?filter=${filter}`, { signal }),
   addChore: (roomId: number, data: ChoreCreate, signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores`, { method: "POST", body: JSON.stringify(data), signal }),
   choreAction: (roomId: number, id: number, action: "accept" | "complete" | "reopen", signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores/${id}/${action}`, { method: "POST", signal }),
+  expenses: (roomId: number, signal?: AbortSignal) => request<ApiExpense[]>(`/rooms/${roomId}/expenses`, { signal }),
+  expense: (roomId: number, id: number, signal?: AbortSignal) => request<ApiExpense>(`/rooms/${roomId}/expenses/${id}`, { signal }),
+  addExpense: (roomId: number, data: { title: string; amount_minor: number; participant_ids: number[]; note: string }, signal?: AbortSignal) => request<ApiExpense>(`/rooms/${roomId}/expenses`, { method: "POST", body: JSON.stringify(data), signal }),
+  money: (roomId: number, signal?: AbortSignal) => request<ApiMoney>(`/rooms/${roomId}/money`, { signal }),
+  reportPayment: (roomId: number, creditorId: number, amountMinor: number, signal?: AbortSignal) => request<ApiSettlement>(`/rooms/${roomId}/settlements`, {
+    method: "POST", body: JSON.stringify({ creditor_id: creditorId, amount_minor: amountMinor }), signal,
+  }),
+  confirmPayment: (roomId: number, id: number, signal?: AbortSignal) => request<ApiSettlement>(`/rooms/${roomId}/settlements/${id}/confirm`, { method: "POST", signal }),
 };
 
 export function inviteCode(value: string): string {

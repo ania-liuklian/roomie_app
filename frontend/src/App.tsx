@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
+import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement } from "./api";
+import { money } from "./money";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
 type ModalName = "invite" | "join" | "room" | "chore" | "expense" | "shopping" | null;
@@ -27,20 +29,15 @@ type Expense = {
   id: number;
   roomId: number;
   title: string;
-  amount: number;
+  amount: string;
+  shares: { user_id: number; share_minor: number }[];
   payerId: number;
   participantIds: number[];
   note: string;
   date: string;
 };
-type Settlement = {
-  id: number;
-  roomId: number;
-  debtorId: number;
-  creditorId: number;
-  amount: number;
-  status: "unpaid" | "requested" | "paid";
-};
+type DebtView = { id: string; debtorId: number; creditorId: number; amount: string;
+  availableMinor: number; requestedMinor: number; status: "unpaid" | "requested"; pending: ApiSettlement[] };
 type ShoppingItem = { id: number; roomId: number; title: string; done: boolean; buyerId?: number };
 
 const nav: { id: Page; label: string; icon: string }[] = [
@@ -252,6 +249,19 @@ function toChore(item: ApiChore): Chore {
     repeat: item.repeat === "weekly" ? "Щотижня" : "Один раз", rotation: item.rotation, rotationIds: item.rotation_ids };
 }
 
+function toExpense(item: ApiExpense, detail = false): Expense {
+  return { id: item.id, roomId: item.room_id, title: item.title, amount: money(item.amount_minor),
+    payerId: item.payer_id, participantIds: item.participant_ids, shares: item.shares,
+    note: detail ? item.note : "", date: formatTimestamp(item.occurred_at) };
+}
+
+function debtViews(items: ApiDebt[], summary: ApiMoney): DebtView[] {
+  return items.map((item) => ({ id: `${item.debtor_id}-${item.creditor_id}`,
+    debtorId: item.debtor_id, creditorId: item.creditor_id, amount: money(item.amount_minor),
+    availableMinor: item.amount_minor - item.requested_minor, requestedMinor: item.requested_minor, status: item.status,
+    pending: summary.settlements.filter((payment) => payment.status === "requested" && payment.debtor_id === item.debtor_id && payment.creditor_id === item.creditor_id) }));
+}
+
 function SessionPanel({ children }: { children: React.ReactNode }) {
   return <div className="modal-backdrop"><section className="modal">
     <header><div><h2>Roomie</h2><p>Ваш спільний простір</p></div></header>
@@ -339,7 +349,6 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const [roomId, setRoomId] = useState(0);
   const [members, setMembers] = useState<Member[]>([currentUser]);
   const [profileName, setProfileName] = useState(currentUser.name);
-  // Money is connected in the next step; no persisted demo data.
   const [chores, setChores] = useState<Chore[]>([]);
   const [filteredChores, setFilteredChores] = useState<Chore[]>([]);
   const [choresRoomId, setChoresRoomId] = useState(0);
@@ -350,7 +359,17 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const [choresReload, setChoresReload] = useState(0);
   const choresRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [moneySummary, setMoneySummary] = useState<ApiMoney | null>(null);
+  const [moneyRoomId, setMoneyRoomId] = useState(0);
+  const [moneyLoading, setMoneyLoading] = useState(false);
+  const [moneySaving, setMoneySaving] = useState(false);
+  const [moneyError, setMoneyError] = useState("");
+  const [expenseFormError, setExpenseFormError] = useState("");
+  const [moneyReload, setMoneyReload] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const moneyRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
+  const detailRequest = useRef<AbortController | null>(null);
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
   const [shoppingRoomId, setShoppingRoomId] = useState(0);
   const [shoppingLoading, setShoppingLoading] = useState(false);
@@ -472,21 +491,43 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     return () => { controller.abort(); choresRequest.current = null; };
   }, [roomId, page, choreFilter, choresReload]);
 
+  useEffect(() => {
+    if (!roomId || page !== "money") return;
+    const controller = new AbortController();
+    moneyRequest.current = { roomId, controller };
+    setMoneyRoomId(roomId);
+    setMoneyLoading(true);
+    setMoneySaving(false);
+    setMoneyError("");
+    setExpenseFormError("");
+    setMoneySummary(null);
+    setExpenses([]);
+    setDetailExpense(null);
+    setModal((value) => value === "expense" ? null : value);
+    Promise.all([api.money(roomId, controller.signal), api.expenses(roomId, controller.signal)])
+      .then(([summary, items]) => {
+        if (controller.signal.aborted) return;
+        setMoneySummary(summary);
+        setExpenses(items.map((item) => toExpense(item)));
+      }).catch((error: Error) => {
+        if (!controller.signal.aborted) setMoneyError(error.message);
+      }).finally(() => { if (!controller.signal.aborted) setMoneyLoading(false); });
+    return () => { controller.abort(); detailRequest.current?.abort(); moneyRequest.current = null; };
+  }, [roomId, page, moneyReload]);
+
   const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", memberIds: [], accent: "#7063df" };
   const roomMembers = members.filter((member) => room.memberIds.includes(member.id));
   const roomChores = chores.filter((chore) => chore.roomId === roomId);
   const roomExpenses = expenses.filter((expense) => expense.roomId === roomId);
   const roomShopping = shopping.filter((item) => item.roomId === roomId);
   const inviteUrl = invite?.roomId === roomId ? inviteLink(invite.code) : "";
-  const member = (id: number) => members.find((item) => item.id === id) || currentUser;
-  const owedByMe = settlements.filter(
-    (item) => item.roomId === roomId && item.debtorId === currentUserId && item.status !== "paid",
-  );
-  const owedToMe = settlements.filter(
-    (item) => item.roomId === roomId && item.creditorId === currentUserId && item.status !== "paid",
-  );
-  const totalIOwe = owedByMe.reduce((sum, item) => sum + item.amount, 0);
-  const totalOwedToMe = owedToMe.reduce((sum, item) => sum + item.amount, 0);
+  const member = (id: number): Member => members.find((item) => item.id === id) || { id, name: "Мешканець", initials: "", color: "#7063df", email: "" };
+  const summary = moneyRoomId === roomId ? moneySummary : null;
+  const owedByMe = summary ? debtViews(summary.owed_by_me, summary) : [];
+  const owedToMe = summary ? debtViews(summary.owed_to_me, summary) : [];
+  const totalIOwe = money(summary?.total_i_owe_minor ?? 0);
+  const totalOwedToMe = money(summary?.total_owed_to_me_minor ?? 0);
+  const confirmedPayments = summary?.settlements.filter((item) => item.status === "paid") || [];
   const donePercent = Math.round(
     (roomChores.filter((item) => item.status === "done").length / Math.max(roomChores.length, 1)) *
       100,
@@ -497,9 +538,35 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     window.setTimeout(() => setToast(""), 2400);
   };
 
-  const updateSettlement = (id: number, status: Settlement["status"]) => {
-    setSettlements(settlements.map((item) => (item.id === id ? { ...item, status } : item)));
-    notify(status === "requested" ? "Запит про оплату надіслано" : "Оплату підтверджено");
+  const repay = async (debt: DebtView, paymentId?: number) => {
+    const context = moneyRequest.current;
+    if (!context || context.roomId !== roomId || context.controller.signal.aborted || moneySaving) return;
+    setMoneySaving(true);
+    setMoneyError("");
+    try {
+      if (paymentId !== undefined) await api.confirmPayment(roomId, paymentId, context.controller.signal);
+      else await api.reportPayment(roomId, debt.creditorId, debt.availableMinor, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      setMoneyReload((value) => value + 1);
+      notify(paymentId === undefined ? "Запит про оплату надіслано" : "Оплату підтверджено");
+    } catch (error) {
+      if (!context.controller.signal.aborted) setMoneyError(error instanceof Error ? error.message : "Не вдалося оновити оплату.");
+    } finally { if (!context.controller.signal.aborted) setMoneySaving(false); }
+  };
+
+  const openExpense = async (expense: Expense) => {
+    detailRequest.current?.abort();
+    const controller = new AbortController();
+    detailRequest.current = controller;
+    setDetailExpense(expense);
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      const item = await api.expense(expense.roomId, expense.id, controller.signal);
+      if (!controller.signal.aborted) setDetailExpense(toExpense(item, true));
+    } catch (error) {
+      if (!controller.signal.aborted) setDetailError(error instanceof Error ? error.message : "Не вдалося завантажити витрату.");
+    } finally { if (!controller.signal.aborted) setDetailLoading(false); }
   };
 
   const copyInvite = async () => {
@@ -605,36 +672,30 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     } finally { if (!context.controller.signal.aborted) setChoresSaving(false); }
   };
 
-  const addExpense = (event: FormEvent<HTMLFormElement>) => {
+  const addExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const context = moneyRequest.current;
+    if (!context || context.roomId !== roomId || context.controller.signal.aborted || moneySaving) return;
     const data = new FormData(event.currentTarget);
     const participantIds = data.getAll("people").map(Number);
-    const amount = Number(data.get("amount"));
-    const expense: Expense = {
-      id: Date.now(),
-      roomId,
-      title: String(data.get("title")),
-      amount,
-      payerId: currentUserId,
-      participantIds: participantIds.length ? participantIds : [currentUserId],
-      note: String(data.get("note")),
-      date: "Щойно",
-    };
-    const share = Math.round(amount / expense.participantIds.length);
-    const newSettlements = expense.participantIds
-      .filter((id) => id !== currentUserId)
-      .map((id, index) => ({
-        id: Date.now() + index,
-        roomId,
-        debtorId: id,
-        creditorId: currentUserId,
-        amount: share,
-        status: "unpaid" as const,
-      }));
-    setExpenses([expense, ...expenses]);
-    setSettlements([...settlements, ...newSettlements]);
-    setModal(null);
-    notify(`Розділено по ${share} ₴`);
+    setExpenseFormError("");
+    let amountMinor: number;
+    try { amountMinor = money(String(data.get("amount"))); }
+    catch (error) { setExpenseFormError((error as Error).message); return; }
+    if (!participantIds.length) { setExpenseFormError("Оберіть хоча б одного учасника."); return; }
+    const title = String(data.get("title")).trim();
+    if (!title) { setExpenseFormError("Введіть назву витрати."); return; }
+    setMoneySaving(true);
+    try {
+      await api.addExpense(roomId, { title, amount_minor: amountMinor, participant_ids: participantIds,
+        note: String(data.get("note")) }, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      setModal(null);
+      setMoneyReload((value) => value + 1);
+      notify("Витрату додано");
+    } catch (error) {
+      if (!context.controller.signal.aborted) setExpenseFormError(error instanceof Error ? error.message : "Не вдалося додати витрату.");
+    } finally { if (!context.controller.signal.aborted) setMoneySaving(false); }
   };
 
   const addShopping = async (event: FormEvent<HTMLFormElement>) => {
@@ -1083,17 +1144,20 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
         )}
 
         {page === "money" && (
-          <div className="page">
+          <div className="page" aria-busy={moneyLoading || moneySaving}>
+            {(moneyLoading || moneyRoomId !== roomId) && <p role="status">Завантаження витрат і балансу…</p>}
+            {moneyRoomId === roomId && moneyError && <div role="alert"><p>{moneyError}</p><button className="outline-button" disabled={moneySaving} onClick={() => setMoneyReload((value) => value + 1)}>Спробувати ще раз</button></div>}
+            {moneySaving && <p role="status">Збереження…</p>}
             <div className="money-hero">
               <div>
                 <span>ВАШ ОСОБИСТИЙ БАЛАНС</span>
-                <strong>−{totalIOwe} ₴</strong>
-                <p>Ви винні двом людям у цій кімнаті</p>
+                <strong>{summary ? `${summary.my_balance_minor > 0 ? "+" : ""}${money(summary.my_balance_minor)} ₴` : "—"}</strong>
+                <p>Ви винні {summary ? totalIOwe : "—"} ₴ у цій кімнаті</p>
               </div>
               <div className="money-hero-side">
                 <small>Водночас вам мають повернути</small>
-                <b>+{totalOwedToMe} ₴</b>
-                <button onClick={() => setModal("expense")}>
+                <b>{summary ? `+${totalOwedToMe} ₴` : "—"}</b>
+                <button disabled={moneyLoading || moneySaving || !summary || roomLoading || !!roomError} onClick={() => { setExpenseFormError(""); setModal("expense"); }}>
                   <Icon name="plus" size={17} />
                   Додати витрату
                 </button>
@@ -1115,15 +1179,18 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                       <span>За спільні покупки</span>
                     </div>
                     <b>−{debt.amount} ₴</b>
-                    {debt.status === "requested" ? (
-                      <span className="request-status">Запит надіслано</span>
-                    ) : (
-                      <button onClick={() => updateSettlement(debt.id, "requested")}>
-                        Я вже віддав(-ла)
-                      </button>
-                    )}
+                    {debt.status === "requested" && <span className="request-status">Запит надіслано: {money(debt.requestedMinor)} ₴</span>}
+                    {debt.availableMinor > 0 && <button disabled={moneySaving || moneyLoading} onClick={() => repay(debt)}>
+                      Я вже віддав(-ла){debt.status === "requested" ? `: ${money(debt.availableMinor)} ₴` : ""}
+                    </button>}
                   </article>
                 ))}
+                {summary && !owedByMe.length && <p>Немає непогашених боргів.</p>}
+                {confirmedPayments.filter((item) => item.debtor_id === currentUserId).map((item) => <article className="debt-row" key={`paid-${item.id}`}>
+                  <Avatar member={member(item.creditor_id)} size="md" />
+                  <div><strong>{member(item.creditor_id).name}</strong><span>Повернення підтверджено</span></div>
+                  <b>−{money(item.amount_minor)} ₴</b><span className="request-status neutral">Підтверджено</span>
+                </article>)}
               </section>
               <section className="surface debt-surface">
                 <div className="section-head">
@@ -1144,16 +1211,22 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                       </span>
                     </div>
                     <b className="positive">+{debt.amount} ₴</b>
-                    {debt.status === "requested" ? (
-                      <button className="confirm" onClick={() => updateSettlement(debt.id, "paid")}>
+                    {debt.status === "requested" ? debt.pending.map((payment) => (
+                      <button key={payment.id} className="confirm" disabled={moneySaving || moneyLoading} onClick={() => repay(debt, payment.id)}>
                         <Icon name="check" size={15} />
-                        Підтвердити
+                        Підтвердити {money(payment.amount_minor)} ₴
                       </button>
-                    ) : (
+                    )) : (
                       <span className="request-status neutral">Очікується</span>
                     )}
                   </article>
                 ))}
+                {summary && !owedToMe.length && <p>Немає непогашених боргів.</p>}
+                {confirmedPayments.filter((item) => item.creditor_id === currentUserId).map((item) => <article className="debt-row" key={`paid-${item.id}`}>
+                  <Avatar member={member(item.debtor_id)} size="md" />
+                  <div><strong>{member(item.debtor_id).name}</strong><span>Повернення підтверджено</span></div>
+                  <b className="positive">+{money(item.amount_minor)} ₴</b><span className="request-status neutral">Підтверджено</span>
+                </article>)}
               </section>
             </div>
             <section className="surface history">
@@ -1166,7 +1239,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
               {roomExpenses.map((expense) => (
                 <button
                   className="expense-line"
-                  onClick={() => setDetailExpense(expense)}
+                  onClick={() => openExpense(expense)}
                   key={expense.id}
                 >
                   <span className="receipt-icon">
@@ -1187,6 +1260,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   <Icon name="chevron" size={17} />
                 </button>
               ))}
+              {summary && !roomExpenses.length && <p>Спільних витрат ще немає.</p>}
             </section>
           </div>
         )}
@@ -1483,20 +1557,20 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
         <Modal
           title="Додати спільну витрату"
           note="Оберіть конкретних людей — Roomie сам порахує частку кожного."
-          onClose={() => setModal(null)}
+          onClose={() => { if (!moneySaving) setModal(null); }}
           wide
         >
-          <form className="form" onSubmit={addExpense}>
+          <form className="form" onSubmit={addExpense} aria-busy={moneySaving}>
             <div className="form-grid">
               <label>
                 Що купили?
-                <input name="title" required placeholder="Побутова хімія" />
+                <input name="title" maxLength={200} disabled={moneySaving} required placeholder="Побутова хімія" />
               </label>
               <label>
-                Сума, ₴<input name="amount" type="number" min="1" required placeholder="0" />
+                Сума, ₴<input name="amount" type="text" inputMode="decimal" disabled={moneySaving} required placeholder="0" />
               </label>
             </div>
-            <fieldset>
+            <fieldset disabled={moneySaving}>
               <legend>Між ким розділити?</legend>
               <div className="people-selector expense-people">
                 {roomMembers.map((item) => (
@@ -1516,13 +1590,14 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
             </fieldset>
             <label>
               Коментар або картка
-              <textarea name="note" rows={3} placeholder="Додайте номер картки чи пояснення" />
+              <textarea name="note" rows={3} maxLength={5000} disabled={moneySaving} placeholder="Додайте номер картки чи пояснення" />
             </label>
+            {expenseFormError && <p role="alert">{expenseFormError}</p>}
             <div className="modal-actions">
-              <button type="button" className="outline-button" onClick={() => setModal(null)}>
+              <button type="button" className="outline-button" disabled={moneySaving} onClick={() => setModal(null)}>
                 Скасувати
               </button>
-              <button className="primary-button">Додати й розділити</button>
+              <button className="primary-button" disabled={moneySaving}>{moneySaving ? "Додавання…" : "Додати й розділити"}</button>
             </div>
           </form>
         </Modal>
@@ -1546,13 +1621,15 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
         </Modal>
       )}
 
-      {detailExpense && (
+      {page === "money" && detailExpense && (
         <Modal
           title={detailExpense.title}
           note={`${detailExpense.date} · оплатив(-ла) ${member(detailExpense.payerId).name}`}
-          onClose={() => setDetailExpense(null)}
+          onClose={() => { detailRequest.current?.abort(); setDetailExpense(null); }}
         >
-          <div className="expense-detail">
+          {detailLoading && <p role="status">Завантаження витрати…</p>}
+          {detailError && <div role="alert"><p>{detailError}</p><button className="outline-button" onClick={() => openExpense(detailExpense)}>Спробувати ще раз</button></div>}
+          {!detailLoading && !detailError && <div className="expense-detail">
             <div className="expense-total">
               <span>ЗАГАЛЬНА СУМА</span>
               <strong>{detailExpense.amount} ₴</strong>
@@ -1567,7 +1644,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                     {id === detailExpense.payerId ? "Оплатив(-ла)" : "Частка у витраті"}
                   </small>
                 </span>
-                <b>{Math.round(detailExpense.amount / detailExpense.participantIds.length)} ₴</b>
+                <b>{money(detailExpense.shares.find((share) => share.user_id === id)!.share_minor)} ₴</b>
               </div>
             ))}
             {detailExpense.note && (
@@ -1575,16 +1652,16 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                 <span>КОМЕНТАР / КАРТКА</span>
                 <strong>{detailExpense.note}</strong>
                 <button
-                  onClick={() => {
-                    navigator.clipboard?.writeText(detailExpense.note);
-                    notify("Скопійовано");
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(detailExpense.note); notify("Скопійовано"); }
+                    catch { setDetailError("Не вдалося скопіювати. Спробуйте ще раз."); }
                   }}
                 >
                   <Icon name="copy" size={16} />
                 </button>
               </div>
             )}
-          </div>
+          </div>}
         </Modal>
       )}
     </div>

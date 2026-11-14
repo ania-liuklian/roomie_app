@@ -140,6 +140,74 @@ test("chore actions use dedicated endpoints and return server status without gen
   await assert.rejects(api.choreAction(7, 9, "reopen"), { status: 409 });
 });
 
+test("expenses use integer amounts and participants without a forged payer", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const item = { id: 21, room_id: 7, title: "Water", amount_minor: 10000, payer_id: 3,
+    participant_ids: [1, 2, 3], shares: [{ user_id: 1, share_minor: 3334 }, { user_id: 2, share_minor: 3333 }, { user_id: 3, share_minor: 3333 }],
+    occurred_at: "2026-11-14T12:00:00Z", note: "test-payment-note" };
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(url.endsWith("/expenses") && !options.method ? [item] : item);
+  };
+  setToken("money-token");
+  assert.equal((await api.expenses(7, controller.signal))[0].amount_minor, 10000);
+  const payload = { title: "Water", amount_minor: 10000, participant_ids: [1, 2, 3], note: item.note };
+  await api.addExpense(7, payload, controller.signal);
+  const detail = await api.expense(7, 21, controller.signal);
+  assert.deepEqual(detail.shares.map((share) => share.share_minor), [3334, 3333, 3333]);
+  assert.deepEqual(JSON.parse(calls[1].options.body), payload);
+  assert.equal(Object.hasOwn(JSON.parse(calls[1].options.body), "payer_id"), false);
+  assert.deepEqual(calls.map(({ url }) => url), ["/api/v1/rooms/7/expenses", "/api/v1/rooms/7/expenses", "/api/v1/rooms/7/expenses/21"]);
+  for (const { options } of calls) {
+    assert.equal(options.headers.get("Authorization"), "Bearer money-token");
+    assert.equal(options.signal, controller.signal);
+  }
+});
+
+test("money and repayments preserve backend totals, IDs and requested/paid states", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/money")) return Response.json({ total_i_owe_minor: 3334, total_owed_to_me_minor: 0, my_balance_minor: -3334 });
+    return Response.json({ id: 5, debtor_id: 3, creditor_id: 1, amount_minor: 3334, status: url.endsWith("/confirm") ? "paid" : "requested" });
+  };
+  setToken("money-token");
+  assert.equal((await api.money(7, controller.signal)).my_balance_minor, -3334);
+  const pending = await api.reportPayment(7, 1, 3334, controller.signal);
+  assert.equal(pending.status, "requested");
+  const paid = await api.confirmPayment(7, pending.id, controller.signal);
+  assert.equal(paid.status, "paid");
+  assert.deepEqual(JSON.parse(calls[1].options.body), { creditor_id: 1, amount_minor: 3334 });
+  assert.equal(calls[2].url, "/api/v1/rooms/7/settlements/5/confirm");
+  assert.equal(calls[2].options.method, "POST");
+  assert.equal(calls[2].options.body, undefined);
+  for (const { options } of calls) {
+    assert.equal(options.headers.get("Authorization"), "Bearer money-token");
+    assert.equal(options.signal, controller.signal);
+  }
+});
+
+test("money errors do not log or echo private notes", async () => {
+  const logged = [];
+  const original = { log: console.log, warn: console.warn, error: console.error };
+  const note = "PRIVATE-TEST-NOTE";
+  for (const key of Object.keys(original)) console[key] = (...args) => logged.push(args);
+  try {
+    globalThis.fetch = async () => Response.json({ detail: note }, { status: 422 });
+    await assert.rejects(api.addExpense(7, { title: "Water", amount_minor: 0, participant_ids: [1], note }),
+      (error) => error.status === 422 && !error.message.includes(note));
+    globalThis.fetch = async () => Response.json({ detail: note }, { status: 409 });
+    await assert.rejects(api.reportPayment(7, 1, 10001), (error) => error.status === 409 && !error.message.includes(note));
+    globalThis.fetch = async () => Response.json({}, { status: 403 });
+    await assert.rejects(api.confirmPayment(7, 5), { status: 403 });
+  } finally {
+    Object.assign(console, original);
+  }
+  assert.deepEqual(logged, []);
+});
+
 test("private 401 clears the session; login failures do not clear it", async () => {
   let expired = 0;
   const listener = () => expired++;

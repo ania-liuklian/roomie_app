@@ -1,6 +1,6 @@
-# Roomie frontend: API integration, steps 1–3
+# Roomie frontend: API integration, steps 1–4
 
-Auth, rooms, members, invitation joining, shopping and chores now use the backend. Existing CSS is unchanged. Money and Today are deliberately not connected yet. No seed data or business records are read from or written to localStorage.
+Auth, rooms, members, invitation joining, shopping, chores and money now use the backend. Existing CSS is unchanged. Today remains for step 5. No seed data or business records are read from or written to localStorage.
 
 ## Run locally (PowerShell)
 
@@ -49,10 +49,23 @@ The list refreshes when entering Shopping, switching rooms, or retrying. Mutatio
 
 Due dates use a native date/time picker in the existing form, interpreted in the device's local timezone and sent as an ISO UTC instant. `formatTimestamp()` displays Kyiv-local Ukrainian strings such as “Сьогодні, 19:00”. API `once`/`weekly` map to “Один раз”/“Щотижня”; `waiting`/`active`/`done` are preserved exactly in state and CSS classes. There are no working edit/delete controls in the current chore UI (the dots button has no handler), so no new controls were added.
 
-**Known leftover for step 5:** Today's progress and nearest chores still read the cached, unfiltered chore list loaded when visiting Chores. Before that visit they may be empty, and progress counts all cached occurrences rather than the current week. They do not use `GET /today` yet. The Today check button now opens Chores instead of performing a local-only completion. The static week strip on Chores is unchanged. Step 5 must connect Today to its authoritative API summary; money remains for step 4.
+**Known leftover for step 5:** Today's progress and nearest chores still read the cached, unfiltered chore list loaded when visiting Chores. Before that visit they may be empty, and progress counts all cached occurrences rather than the current week. They do not use `GET /today` yet. The Today check button now opens Chores instead of performing a local-only completion. The static week strip on Chores is unchanged. Today money/shopping cards similarly use cached data loaded on those screens. Step 5 must connect Today to its authoritative API summary.
+
+## Test step 4: money
+
+1. Open Money and verify the net balance, amount owed, amount receivable, per-person debt cards and expense history. All amounts come from `GET /money`; the frontend does not derive debts from expenses or create settlement rows locally.
+2. Create an expense for 100 UAH with three selected participants. Open its details and verify the server's shares display as 33.34 / 33.33 / 33.33 UAH. Reload and verify persistence. Try `0.29`, comma decimals, an empty participant selection, and excess decimal places. At least one participant is required; the payer can be excluded.
+3. Sign in as a debtor and click “Я вже віддав(-ла)”. It reports the available outstanding amount (minus any already pending requests); no debtor or payer ID is sent. The debt remains outstanding while its request awaits confirmation.
+4. Sign in as the creditor and reopen Money. Confirm the specific pending repayment. The backend changes it to paid and updates balances. Both parties see confirmed rows in their existing debt sections without further action buttons. Only creditors see confirmation buttons; only debtors see reporting buttons. Each pending request has its own confirmation ID/amount; if partial requests exist, a debtor may report only the remaining unrequested amount.
+5. Open an expense detail. Its note/payment details appear only in the existing note block and can be copied. No notes appear on debt cards, expense history, alerts or logs. History state discards notes; details are fetched separately. Failed loads can be retried.
+6. Switch rooms rapidly, stop/restart the backend, try a stale overpayment request, and switch accounts. Verify loading/errors/retry, failed-create form retention, and that old responses cannot replace the selected room's data. Re-entering Money reloads the summary/history, and every successful write refreshes both.
+
+`src/money.ts` is the single conversion boundary: strings in UAH become integer kopecks through digit parsing/BigInt; integer kopecks become display strings through digit slicing. No money division, multiplication or rounding uses floating-point arithmetic. API-provided expense shares are displayed directly; totals are taken directly from the summary. The amount input stays styled as before, accepts a dot or comma and at most two decimal places, and rejects invalid/excessive values instead of rounding.
+
+The money hero displays the backend's signed net balance; the debt sections show gross amounts owed/receivable. Paid rows are historical repayments and do not count toward outstanding totals. Backend permission/overpayment rules remain authoritative. Pending requests do not reduce a debt until confirmed. No expense edit/delete controls exist in this UI, so none were added.
 
 ```powershell
 npx.cmd tsc --noEmit
 npm.cmd run build
-node --test tests/api.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs
 ```
