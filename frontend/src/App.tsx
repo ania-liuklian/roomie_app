@@ -2,10 +2,11 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday } from "./api";
 import { money } from "./money";
+import Avatar, { type AvatarOptions } from "./Avatar";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
 type ModalName = "invite" | "join" | "room" | "chore" | "expense" | "shopping" | null;
-type Member = {
+type Member = AvatarOptions & {
   id: number;
   name: string;
   initials: string;
@@ -153,32 +154,6 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
   );
 }
 
-function Avatar({
-  member,
-  size = "md",
-}: {
-  member: Member;
-  size?: "xs" | "sm" | "md" | "lg" | "xl";
-}) {
-  const avatarColors: Record<number, string> = {
-    1: "#BF8790",
-    2: "#C48F78",
-    3: "#8D9C83",
-    4: "#C5A078",
-  };
-  return (
-    <span
-      className={`avatar avatar-${size} face-avatar`}
-      style={{ background: avatarColors[member.id] || "#A68D84" }}
-    >
-      <span className="roomie-eyes">
-        <i />
-        <i />
-      </span>
-    </span>
-  );
-}
-
 function Stars({ value, onChange }: { value: number; onChange?: (value: number) => void }) {
   return (
     <span className={`stars ${onChange ? "editable" : ""}`}>
@@ -233,6 +208,12 @@ function Modal({
 
 function toMember(user: ApiMember): Member {
   return { ...user, initials: user.name.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() };
+}
+
+function mergeMembers(existing: Member[], users: (ApiMember | null | undefined)[]): Member[] {
+  const byId = new Map(existing.map((user) => [user.id, user]));
+  for (const user of users) if (user) byId.set(user.id, toMember(user));
+  return [...byId.values()];
 }
 
 function toRoom(room: ApiRoom): Room {
@@ -462,7 +443,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     Promise.all([api.members(roomId, controller.signal), api.invite(roomId, controller.signal)])
       .then(([people, code]) => {
         if (controller.signal.aborted) return;
-        setMembers(people.map(toMember));
+        setMembers((existing) => mergeMembers(existing, people));
         setRooms((items) => items.map((item) => item.id === roomId ? { ...item, memberIds: people.map((person) => person.id) } : item));
         setInvite({ roomId, code: code.code });
       }).catch((error: Error) => {
@@ -498,7 +479,10 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setShoppingFormError("");
     setModal((value) => value === "shopping" ? null : value);
     api.shopping(roomId, controller.signal).then((items) => {
-      if (!controller.signal.aborted) setShopping(items.map(toShoppingItem));
+      if (!controller.signal.aborted) {
+        setShopping(items.map(toShoppingItem));
+        setMembers((people) => mergeMembers(people, items.map((item) => item.buyer)));
+      }
     }).catch((error: Error) => {
       if (!controller.signal.aborted) setShoppingError(error.message);
     }).finally(() => { if (!controller.signal.aborted) setShoppingLoading(false); });
@@ -520,6 +504,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
       .then((filtered) => {
         if (controller.signal.aborted) return;
         setFilteredChores(filtered.map(toChore));
+        setMembers((people) => mergeMembers(people, filtered.map((item) => item.owner)));
       }).catch((error: Error) => {
         if (!controller.signal.aborted) setChoresError(error.message);
       }).finally(() => { if (!controller.signal.aborted) setChoresLoading(false); });
@@ -544,6 +529,11 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
         if (controller.signal.aborted) return;
         setMoneySummary(summary);
         setExpenses(items.map((item) => toExpense(item)));
+        setMembers((people) => mergeMembers(people, [
+          ...items.flatMap((item) => [item.payer, ...(item.participants || [])]),
+          ...summary.debts.flatMap((item) => [item.debtor, item.creditor]),
+          ...summary.settlements.flatMap((item) => [item.debtor, item.creditor]),
+        ]));
       }).catch((error: Error) => {
         if (!controller.signal.aborted) setMoneyError(error.message);
       }).finally(() => { if (!controller.signal.aborted) setMoneyLoading(false); });
@@ -559,7 +549,10 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setTodaySaving(false);
     setTodayError("");
     api.today(roomId, controller.signal).then((data) => {
-      if (!controller.signal.aborted) setTodayResult({ roomId, data });
+      if (!controller.signal.aborted) {
+        setTodayResult({ roomId, data });
+        setMembers((people) => mergeMembers(people, data.chores.map((item) => item.owner)));
+      }
     }).catch((error: Error) => {
       if (!controller.signal.aborted) setTodayError(error.message);
     }).finally(() => { if (!controller.signal.aborted) setTodayLoading(false); });
@@ -643,7 +636,10 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setDetailError("");
     try {
       const item = await api.expense(expense.roomId, expense.id, controller.signal);
-      if (!controller.signal.aborted) setDetailExpense(toExpense(item, true));
+      if (!controller.signal.aborted) {
+        setDetailExpense(toExpense(item, true));
+        setMembers((people) => mergeMembers(people, [item.payer, ...(item.participants || [])]));
+      }
     } catch (error) {
       if (!controller.signal.aborted) setDetailError(error instanceof Error ? error.message : "Не вдалося завантажити витрату.");
     } finally { if (!controller.signal.aborted) setDetailLoading(false); }
@@ -786,6 +782,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
       const item = await api.addShopping(roomId, title, context.controller.signal);
       if (context.controller.signal.aborted) return;
       setShopping((items) => [...items, toShoppingItem(item)]);
+      setMembers((people) => mergeMembers(people, [item.buyer]));
       setModal(null);
       notify("Додано до списку");
     } catch (error) {
@@ -800,7 +797,10 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setShoppingError("");
     try {
       const updated = await api.setShoppingDone(item.roomId, item.id, !item.done, context.controller.signal);
-      if (!context.controller.signal.aborted) setShopping((items) => items.map((row) => row.id === updated.id ? toShoppingItem(updated) : row));
+      if (!context.controller.signal.aborted) {
+        setShopping((items) => items.map((row) => row.id === updated.id ? toShoppingItem(updated) : row));
+        setMembers((people) => mergeMembers(people, [updated.buyer]));
+      }
     } catch (error) {
       if (!context.controller.signal.aborted) setShoppingError(error instanceof Error ? error.message : "Не вдалося оновити покупку.");
     } finally { if (!context.controller.signal.aborted) setShoppingSaving(false); }
@@ -1038,14 +1038,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
               <aside className="today-side">
                 <section className="roomie-greeting">
                   <h3>Привіт, я Румі!</h3>
-                  <div className="roomie-peek">
-                    <span className="peek-eye">
-                      <i />
-                    </span>
-                    <span className="peek-eye">
-                      <i />
-                    </span>
-                  </div>
+                  <Avatar member={currentUser} variant="peek" />
                 </section>
                 <button className="today-summary money-summary" onClick={() => setPage("money")}>
                   <h3>Гроші між вами</h3>
@@ -1413,14 +1406,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
           <div className="page profile-layout">
             <section className="surface profile-main">
               <div className="profile-roomie-card">
-                <div className="profile-roomie-head">
-                  <span className="peek-eye">
-                    <i />
-                  </span>
-                  <span className="peek-eye">
-                    <i />
-                  </span>
-                </div>
+                <Avatar member={currentUser} variant="profile" />
               </div>
               <form className="profile-form" onSubmit={saveProfile} aria-busy={profileSaving}>
                 <label>

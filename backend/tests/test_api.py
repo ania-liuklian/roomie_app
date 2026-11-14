@@ -49,16 +49,39 @@ def test_profile_update_and_stats_auth(client):
     assert client.get("/api/v1/me/stats").status_code == 401
     headers = register(client)
     other = register(client, "other@example.com")
-    result = client.patch("/api/v1/me", headers=headers, json={"name": " New Name ", "color": "#123abc"})
+    result = client.patch("/api/v1/me", headers=headers, json={"name": " New Name ", "color": "#C48F78"})
     assert result.status_code == 200
-    assert result.json()["name"] == "New Name" and result.json()["color"] == "#123abc"
+    assert result.json()["name"] == "New Name" and result.json()["color"] == "#C48F78"
     assert "password_hash" not in result.json()
     assert client.get("/api/v1/me", headers=headers).json() == result.json()
     assert client.get("/api/v1/me", headers=other).json()["name"] == "Sofia"
-    assert client.patch("/api/v1/me", headers=headers, json={"name": "Only Name"}).json()["color"] == "#123abc"
+    assert client.patch("/api/v1/me", headers=headers, json={"name": "Only Name"}).json()["color"] == "#C48F78"
     for payload in [{"name": " "}, {"name": None}, {"color": None}, {"color": "bad"}, {"email": "new@example.com"}, {"id": 2}, {"password_hash": "bad"}]:
         assert client.patch("/api/v1/me", headers=headers, json=payload).status_code == 422
     assert client.get("/api/v1/me/stats", headers=headers).json() == {"room_count": 0, "completed_chores": 0, "workloads": []}
+
+
+def test_avatar_defaults_and_all_options(client):
+    from app.avatar import PALETTE
+    headers = register(client)
+    user = client.get("/api/v1/me", headers=headers).json()
+    assert (user["color"], user["eye_style"], user["gaze"]) == ("#BF8790", "plain", "straight")
+    for color in PALETTE:
+        result = client.patch("/api/v1/me", headers=headers, json={"color": color.lower(), "eye_style": "lashes", "gaze": "left"})
+        assert result.status_code == 200 and result.json()["color"] == color
+    for gaze in ("straight", "left", "right", "up", "happy", "sleepy"):
+        assert client.patch("/api/v1/me", headers=headers, json={"gaze": gaze}).json()["gaze"] == gaze
+    assert client.patch("/api/v1/me", headers=headers, json={"name": "New"}).json()["eye_style"] == "lashes"
+    assert client.get("/api/v1/me", headers=headers).json()["gaze"] == "sleepy"
+
+
+@pytest.mark.parametrize("payload", [{"color": "#123abc"}, {"color": "red"}, {"eye_style": "other"}, {"eye_style": None},
+    {"gaze": "down"}, {"gaze": None}, {"gaze": "Happy"}, {"eye_style": 1}, {"gaze": "<script>"}])
+def test_invalid_avatar_options_do_not_change_user(client, payload):
+    headers = register(client)
+    before = client.get("/api/v1/me", headers=headers).json()
+    assert client.patch("/api/v1/me", headers=headers, json=payload).status_code == 422
+    assert client.get("/api/v1/me", headers=headers).json() == before
 
 
 def test_auth_rejects_invalid_tokens(client):

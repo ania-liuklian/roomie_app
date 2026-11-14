@@ -11,6 +11,7 @@ from .balances import compute_balances, split_equal, validate_settlement
 from .database import utcnow
 from .domain_schemas import ChoreCreate, ChoreEdit, ExpenseCreate, ExpenseEdit, SettlementCreate, ShoppingCreate, ShoppingEdit
 from .models import Chore, ChoreRotationMember, Expense, ExpenseShare, Room, RoomMember, Settlement, ShoppingItem, User
+from .schemas import UserOut
 
 KYIV = ZoneInfo("Europe/Kyiv")
 
@@ -18,6 +19,10 @@ KYIV = ZoneInfo("Europe/Kyiv")
 def columns(row):
     # Domain models only; never use this serializer for users/password hashes.
     return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+def public_user(db, user_id):
+    return UserOut.model_validate(db.get(User, user_id)).model_dump() if user_id else None
 
 
 def membership(db, room_id, user_id):
@@ -49,7 +54,7 @@ def rotation_ids(db, chore_id):
 
 
 def chore_out(db, chore):
-    return {**columns(chore), "rotation_ids": rotation_ids(db, chore.id)}
+    return {**columns(chore), "rotation_ids": rotation_ids(db, chore.id), "owner": public_user(db, chore.owner_id)}
 
 
 def share_map(db, expense_id):
@@ -60,6 +65,7 @@ def share_map(db, expense_id):
 def expense_out(db, expense):
     shares = share_map(db, expense.id)
     return {**columns(expense), "participant_ids": sorted(shares),
+            "payer": public_user(db, expense.payer_id), "participants": [public_user(db, uid) for uid in sorted(shares)],
             "shares": [{"user_id": uid, "share_minor": shares[uid]} for uid in sorted(shares)]}
 
 
@@ -81,6 +87,7 @@ def money_out(db, room_id, user_id):
         pending = [s for s in repayments if s.status == "requested" and
                    (s.debtor_id, s.creditor_id) == (debtor, creditor)]
         cards.append({"debtor_id": debtor, "creditor_id": creditor, "amount_minor": amount,
+                      "debtor": public_user(db, debtor), "creditor": public_user(db, creditor),
                       "requested_minor": sum(s.amount_minor for s in pending),
                       "status": "requested" if pending else "unpaid"})
     by_me = [card for card in cards if card["debtor_id"] == user_id]
@@ -90,7 +97,7 @@ def money_out(db, room_id, user_id):
             "total_i_owe_minor": sum(c["amount_minor"] for c in by_me),
             "total_owed_to_me_minor": sum(c["amount_minor"] for c in to_me),
             "my_balance_minor": balances.get(user_id, 0),
-            "settlements": [columns(s) for s in repayments]}
+            "settlements": [{**columns(s), "debtor": public_user(db, s.debtor_id), "creditor": public_user(db, s.creditor_id)} for s in repayments]}
 
 
 def check_amount(amount, outstanding, pending=0):
@@ -269,7 +276,7 @@ def install_routes(app, sessions, current_user):
     @router.get("/shopping-items")
     def list_shopping(room_id: int, user: User = Depends(current_user), db: Session = Depends(read_db)):
         membership(db, room_id, user.id)
-        return [columns(item) for item in db.scalars(select(ShoppingItem).where(ShoppingItem.room_id == room_id).order_by(ShoppingItem.id))]
+        return [{**columns(item), "buyer": public_user(db, item.buyer_id)} for item in db.scalars(select(ShoppingItem).where(ShoppingItem.room_id == room_id).order_by(ShoppingItem.id))]
 
     @router.post("/shopping-items", status_code=201)
     def create_shopping(room_id: int, data: ShoppingCreate, user: User = Depends(current_user), db: Session = Depends(write_db, scope="function")):
@@ -277,7 +284,7 @@ def install_routes(app, sessions, current_user):
         item = ShoppingItem(room_id=room_id, title=data.title, created_by_id=user.id)
         db.add(item)
         db.flush()
-        return columns(item)
+        return {**columns(item), "buyer": public_user(db, item.buyer_id)}
 
     @router.patch("/shopping-items/{item_id}")
     def edit_shopping(room_id: int, item_id: int, data: ShoppingEdit, user: User = Depends(current_user), db: Session = Depends(write_db, scope="function")):
@@ -290,7 +297,7 @@ def install_routes(app, sessions, current_user):
             item.buyer_id = user.id if data.done else None
             item.completed_at = utcnow() if data.done else None
         db.flush()
-        return columns(item)
+        return {**columns(item), "buyer": public_user(db, item.buyer_id)}
 
     @router.delete("/shopping-items/{item_id}", status_code=204)
     def delete_shopping(room_id: int, item_id: int, user: User = Depends(current_user), db: Session = Depends(write_db, scope="function")):

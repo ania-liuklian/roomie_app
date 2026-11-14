@@ -106,7 +106,7 @@ From `frontend`:
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs
 ```
 
 From `backend`:
@@ -120,7 +120,19 @@ Backend tests use temporary SQLite files and test-only JWT secrets; they do not 
 ## Remaining inactive UI / limitations
 
 - The notification bell and chore dots button have no actions. The existing UI exposes no edit/delete controls for chores, shopping or expenses, although the backend supports them.
-- The existing face-avatar renderer does not use the returned initials/color; room accent metadata is likewise retained without changing the fixed visual design.
+- Room accent and initials metadata remain unused by the fixed room design and character avatars.
 - Backend room edit/delete/leave/ownership transfer remain unimplemented. No polling or push updates: revisit a screen or reload to see another member's changes.
 
 No unused TypeScript bindings remain under the strict unused checks. All seed/business persistence code has been removed from `App.tsx`; auth token storage lives only in `api.ts`.
+
+## Avatar customization: stage 1
+
+`src/Avatar.tsx` is the sole character renderer. It uses SVG for the rounded body and white eyes/dark pupils, at every existing avatar location (including the large profile character and Today greeting). Its default is the same rose/plain/straight look, preserving the previous eye geometry and layout classes. No external images or generated assets are used, and other styling is unchanged.
+
+Supported options: the exported eight-color `AVATAR_COLORS` palette, `eye_style: plain/lashes`, and `gaze: straight/left/right/up/happy/sleepy`. Default body color is `#BF8790`; happy uses closed curved eyes and sleepy uses half-closed lids. API fields use `color` for body color, retaining the existing profile contract.
+
+First migrate an existing backend database using the instructions in `../backend/README.md`; `create_all` will not add the new columns automatically. No dev data has been migrated automatically. The migration backs up the file, preserves app records and supplies defaults. Fresh databases get the new schema directly.
+
+Test stage 1 using `/docs`: PATCH your authenticated `/me` with `{"color":"#8D9C83","eye_style":"lashes","gaze":"happy"}`, then reload the frontend and inspect avatars across screens. Another room member can reload to see the same settings on chore owners, expense payers/participants and debt cards. Nested API user objects supply appearance even when users are absent from the current member list. Invalid options should return 422. To reset, use `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`.
+
+The picker, swatches, eye/gaze buttons, live draft preview and avatar-specific Save/Cancel integration are deliberately deferred to stage 2. Existing name Save/Cancel continues working and preserves other stored options.

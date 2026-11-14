@@ -434,3 +434,27 @@ def test_profile_stats_aggregate_only_my_rooms_and_current_members(api):
         assert other["room_count"] == 1 and other["completed_chores"] == 0
         assert [entry["room_id"] for entry in other["workloads"]] == [1]
         assert client.get("/api/v1/me/stats", headers=headers(5)).json() == {"room_count": 0, "completed_chores": 0, "workloads": []}
+
+
+def test_nested_avatar_users_on_members_chores_expenses_shopping_money_and_today(api):
+    request, app = api
+    with app.state.sessions() as db:
+        user = db.get(User, 1)
+        user.color, user.eye_style, user.gaze = "#8D9C83", "lashes", "happy"
+        db.commit()
+    def check(user):
+        assert (user["color"], user["eye_style"], user["gaze"]) == ("#8D9C83", "lashes", "happy")
+        assert "password_hash" not in user
+    check(request("GET", "/1/members").json()[0])
+    check(chore(api)["owner"])
+    check(request("GET", "/1/chores").json()[0]["owner"])
+    check(request("GET", "/1/today").json()["chores"][0]["owner"])
+    item = expense(api)
+    check(item["payer"])
+    check(item["participants"][0])
+    check(request("GET", f"/1/expenses/{item['id']}").json()["payer"])
+    check(request("GET", "/1/expenses").json()[0]["participants"][0])
+    shopping = request("POST", "/1/shopping-items", json={"title": "Soap"}).json()
+    check(request("PATCH", f"/1/shopping-items/{shopping['id']}", json={"done": True}).json()["buyer"])
+    check(request("GET", "/1/shopping-items").json()[0]["buyer"])
+    check(request("GET", "/1/money").json()["debts"][0]["creditor"])

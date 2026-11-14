@@ -1,6 +1,7 @@
 from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from .database import Base, UTCDateTime, utcnow
+from .avatar import DEFAULT_COLOR, PALETTE
 
 
 class Timestamps:
@@ -14,7 +15,14 @@ class User(Timestamps, Base):
     email = Column(String(254), unique=True, nullable=False)
     password_hash = Column(String(100), nullable=False)
     name = Column(String(100), nullable=False)
-    color = Column(String(7), nullable=False, default="#7063df")
+    color = Column(String(7), nullable=False, default=DEFAULT_COLOR, server_default=DEFAULT_COLOR)
+    eye_style = Column(String(10), nullable=False, default="plain", server_default="plain")
+    gaze = Column(String(10), nullable=False, default="straight", server_default="straight")
+    __table_args__ = (
+        CheckConstraint("color IN (" + ",".join(repr(color) for color in PALETTE) + ")"),
+        CheckConstraint("eye_style IN ('plain','lashes')"),
+        CheckConstraint("gaze IN ('straight','left','right','up','happy','sleepy')"),
+    )
 
 
 class Room(Timestamps, Base):

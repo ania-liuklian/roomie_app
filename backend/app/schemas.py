@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from .avatar import AvatarColor, EyeStyle, Gaze
 
 
 class Credentials(BaseModel):
@@ -34,15 +35,24 @@ class UserOut(BaseModel):
     id: int
     email: str
     name: str
-    color: str
+    color: AvatarColor
+    eye_style: EyeStyle
+    gaze: Gaze
 
 
 class ProfileEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    color: AvatarColor | None = None
+    eye_style: EyeStyle | None = None
+    gaze: Gaze | None = None
 
-    @field_validator("name", "color")
+    @field_validator("color", mode="before")
+    @classmethod
+    def normalize_color(cls, value):
+        return value.upper() if isinstance(value, str) else value
+
+    @field_validator("name", "color", "eye_style", "gaze")
     @classmethod
     def nonblank(cls, value):
         if value is None or not value.strip():

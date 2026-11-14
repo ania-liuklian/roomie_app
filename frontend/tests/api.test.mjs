@@ -242,7 +242,7 @@ test("calendar strip uses current Kyiv week across midnight and year boundaries"
 test("profile updates use PATCH /me with name/color; stats are read from the API", async () => {
   const calls = [];
   const controller = new AbortController();
-  const user = { id: 3, name: "Updated Name", color: "#123abc", email: "user@example.com" };
+  const user = { id: 3, name: "Updated Name", color: "#C48F78", email: "user@example.com" };
   const stats = { room_count: 2, completed_chores: 7, workloads: [{ room_id: 7, members: [{ user_id: 3, unfinished_chores: 2, workload_percent: 50 }] }] };
   setToken("profile-token");
   globalThis.fetch = async (url, options) => {

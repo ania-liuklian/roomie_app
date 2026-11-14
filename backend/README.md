@@ -54,7 +54,7 @@ Frontend checks, from `frontend` (see its README for browser checks):
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs
 ```
 
 ## Implemented API
@@ -66,7 +66,7 @@ All paths below have prefix `/api/v1`.
 | POST | `/auth/register` | Unique normalized email, bcrypt password; returns JWT (201). |
 | POST | `/auth/login` | JSON credentials; returns JWT. |
 | GET | `/me` | Authenticated user's safe profile. |
-| PATCH | `/me` | Update own name/color; safe profile response, blank/null/unknown fields rejected. |
+| PATCH | `/me` | Update own name/color/eye_style/gaze; safe profile response, blank/null/unknown fields rejected. |
 | GET | `/me/stats` | Own room count, completed assigned chores and per-room member workloads. |
 | POST | `/rooms` | Create room, owner membership and random invite in one transaction (201). Body: `number`, optional hex `accent`. Returns room and `invite_code`. |
 | GET | `/rooms` | Only the authenticated user's rooms. |
@@ -212,8 +212,33 @@ Never log expense notes, request/response bodies, passwords or bearer tokens. SQ
 
 Frontend integration is complete for Today, chores, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell and chore dots have no actions. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
 
-`PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters) and `color` (`#RRGGBB`). It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. Frontend Save sends the current color because its existing design has no color picker.
+`PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. Frontend Save preserves stored avatar settings; the customization picker belongs to avatar stage 2.
 
 `GET /me/stats` returns `{room_count, completed_chores, workloads: [{room_id, members: [{user_id, unfinished_chores, workload_percent}]}]}`. Counts include only rooms the caller belongs to; completed count covers their own assigned completed occurrences, and unfinished workload includes waiting/active occurrences assigned to each current member. Bar percentages are each member's fraction of the room's unfinished count, rounded to whole percentages; empty rooms return zero percentages. The endpoint reads a consistent SQLite snapshot and does not expose other rooms. No frontend chore cache is used for these metrics.
 
-This integration changes no database tables; existing SQLite databases can be reused. Runtime environment files and database files must remain untracked; only empty/documentation `.env.example` templates belong in Git. Backend test fixtures contain intentionally fake test-only credentials. Never use them as real configuration.
+Runtime environment files and database files must remain untracked; only empty/documentation `.env.example` templates belong in Git. Backend test fixtures contain intentionally fake test-only credentials. Never use them as real configuration.
+
+## Avatar stage 1: schema update required
+
+The user model now stores `color` (body color, reusing the existing field), `eye_style` and `gaze`. Defaults are `#BF8790`, `plain`, `straight`: the current rose Roomie with its existing eye/pupil geometry. Allowed colors, drawn from existing avatar/CSS colors, are `#BF8790`, `#C48F78`, `#8D9C83`, `#C5A078`, `#A68D84`, `#DB8999`, `#9A786F`, `#9D76CF`. Input palette colors are case-insensitive and normalized to uppercase. Eye style is `plain` or `lashes`; gaze is `straight`, `left`, `right`, `up`, `happy`, or `sleepy`. Nulls and other values are rejected; SQL constraints enforce the vocabulary too.
+
+**Existing dev database:** stop the backend first. From `backend`, with `DATABASE_URL` set to the same SQLite file your server uses (default `sqlite:///./roomie.db`), run:
+
+```powershell
+.\.venv\Scripts\python -m app.migrate_avatars
+.\.venv\Scripts\python -m uvicorn app.main:create_app --factory --reload
+```
+
+Keep `JWT_SECRET` set in that terminal as described above. The migration creates an SQLite backup next to the database (`roomie.db-avatar-backup-<timestamp>`), adds columns, normalizes palette colors and changes old nonpalette colors to rose. Those old arbitrary colors were not used by the previous avatar renderer. Existing users default to plain/straight. Names, password hashes, room/financial/chore history and foreign keys are preserved. Re-running preserves valid customization. Legacy color-column enforcement uses triggers because SQLite cannot add a CHECK to that column without rebuilding the table. Backups are git-ignored alongside databases. This migration has tests; it has not been run against your dev database automatically.
+
+**Disposable-data alternative:** instead of migrating, stop the backend and set `$env:DATABASE_URL = "sqlite:///./roomie-avatar-dev.db"`, then start it. A fresh schema will be created; register new users. Your original database remains untouched. `create_all` alone cannot update an existing schema.
+
+Avatar fields are returned by `/me`, member lists, nested chore `owner`, expense `payer` and `participants` (including details), money debt/settlement `debtor`/`creditor`, and shopping `buyer`. Existing IDs and expense `shares` are unchanged. User objects never include password hashes. The frontend consumes these nested users, so historical expense participants do not depend on the current membership list.
+
+To test customization before the picker is built, authorize in `/docs` and call `PATCH /api/v1/me` with:
+
+```json
+{"color":"#8D9C83","eye_style":"lashes","gaze":"sleepy"}
+```
+
+Reload the frontend, then inspect header/sidebar/profile, members, chores and money. Reset with `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`. The profile picker, live draft preview and avatar Cancel behavior remain stage 2.

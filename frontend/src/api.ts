@@ -50,28 +50,32 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   return response.status === 204 ? undefined as T : response.json();
 }
 
-export type ApiMember = { id: number; name: string; email: string; color: string };
+export type ApiMember = { id: number; name: string; email: string; color: string;
+  eye_style: "plain" | "lashes"; gaze: "straight" | "left" | "right" | "up" | "happy" | "sleepy" };
 export type ApiStats = { room_count: number; completed_chores: number;
   workloads: { room_id: number; members: { user_id: number; unfinished_chores: number; workload_percent: number }[] }[] };
 export type ApiRoom = { id: number; number: string; accent: string; member_ids: number[]; created_at: string; updated_at: string };
 export type InvitePreview = { number: string; accent: string };
 export type ChoreFilter = "all" | "mine" | "waiting" | "done";
 export type ApiChore = {
+  owner?: ApiMember;
   id: number; room_id: number; title: string; owner_id: number; difficulty: number;
   due_at: string; status: "waiting" | "active" | "done";
   repeat: "once" | "weekly"; rotation: "same" | "rotate"; rotation_ids: number[];
 };
 export type ChoreCreate = Omit<ApiChore, "id" | "room_id" | "status">;
 export type ApiExpense = {
+  payer?: ApiMember; participants?: ApiMember[];
   id: number; room_id: number; title: string; amount_minor: number; payer_id: number;
   participant_ids: number[]; shares: { user_id: number; share_minor: number }[];
   note: string; occurred_at: string;
 };
 export type ApiSettlement = {
+  debtor?: ApiMember; creditor?: ApiMember;
   id: number; room_id: number; debtor_id: number; creditor_id: number; amount_minor: number;
   status: "requested" | "paid"; requested_at: string; paid_at: string | null;
 };
-export type ApiDebt = { debtor_id: number; creditor_id: number; amount_minor: number; requested_minor: number; status: "unpaid" | "requested" };
+export type ApiDebt = { debtor?: ApiMember; creditor?: ApiMember; debtor_id: number; creditor_id: number; amount_minor: number; requested_minor: number; status: "unpaid" | "requested" };
 export type ApiMoney = {
   balances: { user_id: number; balance_minor: number }[]; debts: ApiDebt[];
   owed_by_me: ApiDebt[]; owed_to_me: ApiDebt[];
@@ -85,6 +89,7 @@ export type ApiToday = {
   shopping: { total: number; done: number; remaining: number };
 };
 export type ApiShoppingItem = {
+  buyer?: ApiMember | null;
   id: number; room_id: number; title: string; done: boolean;
   buyer_id: number | null; completed_at: string | null;
   created_by_id: number; created_at: string; updated_at: string;
@@ -98,7 +103,7 @@ export const api = {
     method: "POST", body: JSON.stringify({ name, email, password }),
   }, false),
   me: (signal?: AbortSignal) => request<ApiMember>("/me", { signal }),
-  updateMe: (data: { name: string; color: string }, signal?: AbortSignal) => request<ApiMember>("/me", { method: "PATCH", body: JSON.stringify(data), signal }),
+  updateMe: (data: Partial<Pick<ApiMember, "name" | "color" | "eye_style" | "gaze">>, signal?: AbortSignal) => request<ApiMember>("/me", { method: "PATCH", body: JSON.stringify(data), signal }),
   stats: (signal?: AbortSignal) => request<ApiStats>("/me/stats", { signal }),
   rooms: (signal?: AbortSignal) => request<ApiRoom[]>("/rooms", { signal }),
   members: (roomId: number, signal?: AbortSignal) => request<ApiMember[]>(`/rooms/${roomId}/members`, { signal }),
