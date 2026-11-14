@@ -44,6 +44,23 @@ def test_auth_hash_normalization_and_login(client):
         assert client.post("/api/v1/auth/login", json={"email": email, "password": "wrongpass"}).status_code == 401
 
 
+def test_profile_update_and_stats_auth(client):
+    assert client.patch("/api/v1/me", json={"name": "New"}).status_code == 401
+    assert client.get("/api/v1/me/stats").status_code == 401
+    headers = register(client)
+    other = register(client, "other@example.com")
+    result = client.patch("/api/v1/me", headers=headers, json={"name": " New Name ", "color": "#123abc"})
+    assert result.status_code == 200
+    assert result.json()["name"] == "New Name" and result.json()["color"] == "#123abc"
+    assert "password_hash" not in result.json()
+    assert client.get("/api/v1/me", headers=headers).json() == result.json()
+    assert client.get("/api/v1/me", headers=other).json()["name"] == "Sofia"
+    assert client.patch("/api/v1/me", headers=headers, json={"name": "Only Name"}).json()["color"] == "#123abc"
+    for payload in [{"name": " "}, {"name": None}, {"color": None}, {"color": "bad"}, {"email": "new@example.com"}, {"id": 2}, {"password_hash": "bad"}]:
+        assert client.patch("/api/v1/me", headers=headers, json=payload).status_code == 422
+    assert client.get("/api/v1/me/stats", headers=headers).json() == {"room_count": 0, "completed_chores": 0, "workloads": []}
+
+
 def test_auth_rejects_invalid_tokens(client):
     register(client)
     now = utcnow()

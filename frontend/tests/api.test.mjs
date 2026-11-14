@@ -14,7 +14,7 @@ window.location = { origin: "http://localhost:8443" };
 const source = fs.readFileSync(new URL("../src/api.ts", import.meta.url), "utf8")
   .replaceAll("import.meta.env", '({ VITE_API_BASE_URL: "/api/v1", BASE_URL: "/" })');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
-const { api, setToken, getToken, inviteCode, inviteLink, formatTimestamp } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { api, setToken, getToken, inviteCode, inviteLink, formatTimestamp, currentWeek } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 
 beforeEach(() => setToken(null));
 
@@ -206,6 +206,63 @@ test("money errors do not log or echo private notes", async () => {
     Object.assign(console, original);
   }
   assert.deepEqual(logged, []);
+});
+
+test("Today fetches its authoritative weekly summary with JWT and cancellation", async () => {
+  const controller = new AbortController();
+  const payload = { date: "2026-11-16", week_start: "2026-11-16", chores: [],
+    weekly_progress: { done: 1, total: 2, percent: 50 },
+    money: { total_i_owe_minor: 3334, total_owed_to_me_minor: 1100, my_balance_minor: -2234 },
+    shopping: { total: 5, done: 2, remaining: 3 } };
+  setToken("today-token");
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "/api/v1/rooms/7/today");
+    assert.equal(options.headers.get("Authorization"), "Bearer today-token");
+    assert.equal(options.signal, controller.signal);
+    return Response.json(payload);
+  };
+  assert.deepEqual(await api.today(7, controller.signal), payload);
+  globalThis.fetch = async () => Response.json({}, { status: 403 });
+  await assert.rejects(api.today(8), { status: 403 });
+  globalThis.fetch = async () => { throw new DOMException("Aborted", "AbortError"); };
+  await assert.rejects(api.today(7, controller.signal), { name: "AbortError" });
+});
+
+test("calendar strip uses current Kyiv week across midnight and year boundaries", () => {
+  const days = currentWeek(new Date("2026-11-15T22:30:00Z"));
+  assert.equal(days[0].key, "2026-11-16");
+  assert.equal(days[0].current, true);
+  assert.equal(days[6].key, "2026-11-22");
+  assert.equal(days.filter((day) => day.current).length, 1);
+  const newYear = currentWeek(new Date("2027-01-01T12:00:00Z"));
+  assert.equal(newYear[0].key, "2026-12-28");
+  assert.equal(newYear[6].key, "2027-01-03");
+});
+
+test("profile updates use PATCH /me with name/color; stats are read from the API", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const user = { id: 3, name: "Updated Name", color: "#123abc", email: "user@example.com" };
+  const stats = { room_count: 2, completed_chores: 7, workloads: [{ room_id: 7, members: [{ user_id: 3, unfinished_chores: 2, workload_percent: 50 }] }] };
+  setToken("profile-token");
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(url.endsWith("/stats") ? stats : user);
+  };
+  assert.deepEqual(await api.updateMe({ name: user.name, color: user.color }, controller.signal), user);
+  assert.deepEqual(await api.stats(controller.signal), stats);
+  assert.equal(calls[0].url, "/api/v1/me");
+  assert.equal(calls[0].options.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { name: user.name, color: user.color });
+  assert.equal(calls[1].url, "/api/v1/me/stats");
+  for (const { options } of calls) {
+    assert.equal(options.headers.get("Authorization"), "Bearer profile-token");
+    assert.equal(options.signal, controller.signal);
+  }
+  globalThis.fetch = async () => Response.json({}, { status: 422 });
+  await assert.rejects(api.updateMe({ name: " ", color: "bad" }), { status: 422 });
+  globalThis.fetch = async () => { throw new TypeError("offline"); };
+  await assert.rejects(api.stats(), { status: 0 });
 });
 
 test("private 401 clears the session; login failures do not clear it", async () => {

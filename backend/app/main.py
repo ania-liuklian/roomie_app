@@ -9,13 +9,13 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .database import Base, make_engine, utcnow
-from .models import Room, RoomInvite, RoomMember, User
-from .schemas import Credentials, Register, RoomCreate, TokenOut, UserOut
+from .models import Chore, Room, RoomInvite, RoomMember, User
+from .schemas import Credentials, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
 
 
 def create_app(database_url=None, jwt_secret=None):
@@ -108,6 +108,34 @@ def create_app(database_url=None, jwt_secret=None):
     @app.get("/api/v1/me", response_model=UserOut)
     def me(user: User = Depends(current_user)):
         return user
+
+    @app.patch("/api/v1/me", response_model=UserOut)
+    def update_me(data: ProfileEdit, user: User = Depends(current_user), db: Session = Depends(db_session)):
+        for key, value in data.model_dump(exclude_unset=True).items():
+            setattr(user, key, value)
+        db.commit()
+        return user
+
+    @app.get("/api/v1/me/stats")
+    def my_stats(user: User = Depends(current_user)):
+        with sessions() as db:
+            db.execute(text("BEGIN"))
+            room_ids = list(db.scalars(select(RoomMember.room_id).where(RoomMember.user_id == user.id)))
+            counts = db.execute(select(Chore.room_id, Chore.owner_id,
+                func.sum(case((Chore.status == "done", 1), else_=0)),
+                func.sum(case((Chore.status != "done", 1), else_=0)))
+                .where(Chore.room_id.in_(room_ids)).group_by(Chore.room_id, Chore.owner_id)).all()
+            completed = sum(done for _, uid, done, _ in counts if uid == user.id)
+            unfinished = {(rid, uid): count for rid, uid, _, count in counts}
+            workloads = []
+            for rid in sorted(room_ids):
+                ids = list(db.scalars(select(RoomMember.user_id).where(RoomMember.room_id == rid).order_by(RoomMember.user_id)))
+                total = sum(unfinished.get((rid, uid), 0) for uid in ids)
+                workloads.append({"room_id": rid, "members": [
+                    {"user_id": uid, "unfinished_chores": unfinished.get((rid, uid), 0),
+                     "workload_percent": round(100 * unfinished.get((rid, uid), 0) / total) if total else 0}
+                    for uid in ids]})
+            return {"room_count": len(room_ids), "completed_chores": completed, "workloads": workloads}
 
     @app.post("/api/v1/rooms", status_code=201)
     def create_room(data: RoomCreate, user: User = Depends(current_user), db: Session = Depends(db_session)):

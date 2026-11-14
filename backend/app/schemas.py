@@ -37,6 +37,19 @@ class UserOut(BaseModel):
     color: str
 
 
+class ProfileEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+    @field_validator("name", "color")
+    @classmethod
+    def nonblank(cls, value):
+        if value is None or not value.strip():
+            raise ValueError("Profile fields cannot be blank or null")
+        return value.strip()
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

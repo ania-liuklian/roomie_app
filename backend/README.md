@@ -1,6 +1,6 @@
 # Roomie backend
 
-Implemented now: FastAPI, SQLAlchemy/SQLite, all domain tables, bcrypt registration/login, 30-minute JWT access tokens, `GET /me`, rooms, persistent random invite codes, membership, chores with recurrence/rotation, shopping, expenses, repayments, money summaries and Today. The frontend still uses its existing local state.
+Implemented now: FastAPI, SQLAlchemy/SQLite, all domain tables, bcrypt registration/login, 30-minute JWT access tokens, `GET /me`, rooms, persistent random invite codes, membership, chores with recurrence/rotation, shopping, expenses, repayments, money summaries and Today. The frontend is connected to all these routes; only the auth token is stored in browser storage.
 
 ## Run (PowerShell, from this backend directory)
 
@@ -9,12 +9,35 @@ Requires Python 3.11+.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
-$env:JWT_SECRET = (python -c "import secrets; print(secrets.token_urlsafe(48))")
+$env:JWT_SECRET = (.\.venv\Scripts\python -c "import secrets; print(secrets.token_urlsafe(48))")
 $env:DATABASE_URL = "sqlite:///./roomie.db"
 .\.venv\Scripts\python -m uvicorn app.main:create_app --factory --reload
 ```
 
 Open http://127.0.0.1:8000/docs. Register or log in with JSON `{ "email": "sofia@example.com", "password": "password123", "name": "Sofia" }` (omit `name` for login). Use the returned `access_token` in Swagger's **Authorize**, or send `Authorization: Bearer <token>`.
+
+### Start the frontend alongside it
+
+Keep the backend terminal running. Open a second PowerShell terminal in the repository root (the directory containing `backend` and `frontend`):
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Requires Node.js 22.12+ (Node 24 works). Open http://localhost:8443. Vite proxies `/api` to port 8000; no backend CORS setup is needed for this default. Stop each server with `Ctrl+C`. On subsequent starts, skip environment/dependency installation and rerun the server commands. If you open a fresh backend terminal, set its environment variables again.
+
+### Environment variables
+
+| Variable | Default / behavior |
+|---|---|
+| `JWT_SECRET` | Required random secret, at least 32 bytes; no default. Set in the backend process environment and preserve it across restarts to keep tokens valid. |
+| `DATABASE_URL` | `sqlite:///./roomie.db`; relative paths use the backend working directory. |
+| `VITE_API_BASE_URL` | Frontend only: `/api/v1`. Configure in `frontend/.env.local` using `frontend/.env.example`; restart Vite after changes. |
+| `PORT` | Frontend only: optional Vite port, default 8443. |
+
+`backend/.env.example` is a variable reference with an empty secret, not a real configuration. The backend does not automatically read `.env`; the PowerShell commands above set process variables directly. Never set `VITE_JWT_SECRET` or otherwise put backend secrets into a frontend build. An absolute frontend API URL needs appropriate backend CORS in that deployment; the local default avoids this with the proxy. Real environment files and SQLite databases/journals are ignored by Git at repository level and in backend rules.
 
 Keep the generated JWT secret stable across restarts if existing tokens should remain valid; supply it through your deployment environment. No default secret is provided. Passwords must contain at least 8 characters and no more than 72 UTF-8 bytes, and are hashed with bcrypt (see [bcrypt's input limit](https://github.com/pyca/bcrypt)). Access tokens expire after 30 minutes; login again to obtain another. No refresh/logout endpoint yet. JWT decoding explicitly permits only HS256 and requires identity, issuance, expiry, issuer and audience claims; see [PyJWT usage](https://pyjwt.readthedocs.io/en/stable/usage.html).
 
@@ -26,6 +49,14 @@ The database is created at startup, relative to the working directory. Foreign k
 
 Tests use temporary SQLite files and an explicit test secret; no real data or seed accounts are installed.
 
+Frontend checks, from `frontend` (see its README for browser checks):
+
+```powershell
+npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
+npm.cmd run build
+node --test tests/api.test.mjs tests/money.test.mjs
+```
+
 ## Implemented API
 
 All paths below have prefix `/api/v1`.
@@ -35,6 +66,8 @@ All paths below have prefix `/api/v1`.
 | POST | `/auth/register` | Unique normalized email, bcrypt password; returns JWT (201). |
 | POST | `/auth/login` | JSON credentials; returns JWT. |
 | GET | `/me` | Authenticated user's safe profile. |
+| PATCH | `/me` | Update own name/color; safe profile response, blank/null/unknown fields rejected. |
+| GET | `/me/stats` | Own room count, completed assigned chores and per-room member workloads. |
 | POST | `/rooms` | Create room, owner membership and random invite in one transaction (201). Body: `number`, optional hex `accent`. Returns room and `invite_code`. |
 | GET | `/rooms` | Only the authenticated user's rooms. |
 | GET | `/rooms/{room_id}` | Member-only room details and `member_ids`. |
@@ -103,7 +136,7 @@ Today returns `date`, `week_start`, `chores`, `weekly_progress: {done,total,perc
 | Logo / Today navigation | `GET R/today`: nearest incomplete chores, weekly progress, my debts, shopping counts | Now |
 | Select room, or select a room in profile | `GET /rooms`, `GET R`, then selected screen's GET | Now for room data |
 | Chores / Money / Shopping / Members navigation; Today money/shopping cards | GET endpoints for the selected screen below | Now |
-| Profile avatar / profile navigation | `GET /me`, `GET /me/stats`, `GET /rooms` | Now except stats |
+| Profile avatar / profile navigation | `GET /me`, `GET /me/stats`, `GET /rooms` | Now |
 | Open create-room modal; submit | Opening is local; `POST /rooms` on submit | Now |
 | Open invite modal / copy invite from sidebar, members or modal | `GET R/invite`, then clipboard locally | Now |
 | Click invite link / open join preview | `GET /invites/{code}`; preview will no longer reuse the selected room's state | Now |
@@ -128,7 +161,7 @@ Today returns `date`, `week_start`, `chores`, `weekly_progress: {done,total,perc
 | Check/uncheck shopping item | `PATCH R/shopping-items/{id}` with explicit `done`; server sets/clears buyer and completion time | Now |
 | Load room/members screen | `GET R`, `GET R/members`, `GET R/invite` | Now |
 | Edit profile name / cancel | Local draft / reset from `GET /me`; cancel needs no mutation | Local |
-| Save profile | `PATCH /me` for name/color | Later |
+| Save profile | `PATCH /me` for name/color | Now |
 | Open/close modal, click backdrop, cancel form, dismiss detail | Local only | Local |
 | Notification bell, chore dots, static week strip | Currently no handlers; no API call | Local |
 
@@ -136,7 +169,7 @@ The existing UI permits checks on waiting chores and other people's chores. The 
 
 ### Additional actions and future contracts
 
-Chore/expense/shopping edit/delete and repayment cancellation are implemented as above. Room management and profile changes below remain future contracts; no frontend changes are included.
+Chore/expense/shopping edit/delete, repayment cancellation and profile changes are implemented as above. Additional room management below remains a future contract.
 
 | Action | Proposed endpoint and rules |
 |---|---|
@@ -177,4 +210,10 @@ Expense edits/deletes that change a pair with any confirmed repayment are conser
 
 Never log expense notes, request/response bodies, passwords or bearer tokens. SQLAlchemy uses `hide_parameters=True`, SQL echo is disabled, and validation responses omit submitted inputs. Do not enable SQL debug/echo logging or body-capturing middleware/APM. Notes are intended only for authorized room responses and storage, not diagnostics. Uvicorn access logs contain method/path/status, not request bodies.
 
-No frontend files were changed. Profile editing/statistics and room edit/delete/leave/ownership-transfer remain unimplemented. This stage changes no database tables; existing Stage 2 SQLite databases can be reused. Install the updated requirements for timezone data on Windows, then restart the backend to see the new routes in `/docs`.
+Frontend integration is complete for Today, chores, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell and chore dots have no actions. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
+
+`PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters) and `color` (`#RRGGBB`). It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. Frontend Save sends the current color because its existing design has no color picker.
+
+`GET /me/stats` returns `{room_count, completed_chores, workloads: [{room_id, members: [{user_id, unfinished_chores, workload_percent}]}]}`. Counts include only rooms the caller belongs to; completed count covers their own assigned completed occurrences, and unfinished workload includes waiting/active occurrences assigned to each current member. Bar percentages are each member's fraction of the room's unfinished count, rounded to whole percentages; empty rooms return zero percentages. The endpoint reads a consistent SQLite snapshot and does not expose other rooms. No frontend chore cache is used for these metrics.
+
+This integration changes no database tables; existing SQLite databases can be reused. Runtime environment files and database files must remain untracked; only empty/documentation `.env.example` templates belong in Git. Backend test fixtures contain intentionally fake test-only credentials. Never use them as real configuration.

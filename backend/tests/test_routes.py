@@ -408,3 +408,29 @@ def test_missing_resources_and_openapi(api):
         if suffix.endswith("/1"):
             suffix = suffix[:-2] + "/{item_id}"
         assert method.lower() in paths[f"/api/v1/rooms/{{room_id}}{suffix}"]
+
+
+def test_profile_stats_aggregate_only_my_rooms_and_current_members(api):
+    request, app = api
+    first = chore(api)
+    request("POST", f"/1/chores/{first['id']}/complete")
+    second = chore(api, room=2)
+    request("POST", f"/2/chores/{second['id']}/complete")
+    chore(api, owner_id=2)  # waiting counts toward unfinished workload
+    chore(api, uid=2)  # active counts too
+    chore(api, uid=3)
+    # Access the app through a client with the same fixture database.
+    with TestClient(app) as client:
+        now = datetime.now(timezone.utc)
+        def headers(uid):
+            return {"Authorization": "Bearer " + jwt.encode({"sub": str(uid), "iat": now, "exp": now + timedelta(minutes=30), "iss": "roomie", "aud": "roomie-api"}, SECRET, algorithm="HS256")}
+        stats = client.get("/api/v1/me/stats", headers=headers(1)).json()
+        assert stats["room_count"] == 2 and stats["completed_chores"] == 2
+        members = stats["workloads"][0]["members"]
+        assert {m["user_id"]: m["unfinished_chores"] for m in members} == {1: 0, 2: 2, 3: 1, 4: 0}
+        assert members[1]["workload_percent"] == 67
+        assert stats["workloads"][1]["members"] == [{"user_id": 1, "unfinished_chores": 0, "workload_percent": 0}]
+        other = client.get("/api/v1/me/stats", headers=headers(2)).json()
+        assert other["room_count"] == 1 and other["completed_chores"] == 0
+        assert [entry["room_id"] for entry in other["workloads"]] == [1]
+        assert client.get("/api/v1/me/stats", headers=headers(5)).json() == {"room_count": 0, "completed_chores": 0, "workloads": []}

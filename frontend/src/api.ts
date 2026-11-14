@@ -51,6 +51,8 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
 }
 
 export type ApiMember = { id: number; name: string; email: string; color: string };
+export type ApiStats = { room_count: number; completed_chores: number;
+  workloads: { room_id: number; members: { user_id: number; unfinished_chores: number; workload_percent: number }[] }[] };
 export type ApiRoom = { id: number; number: string; accent: string; member_ids: number[]; created_at: string; updated_at: string };
 export type InvitePreview = { number: string; accent: string };
 export type ChoreFilter = "all" | "mine" | "waiting" | "done";
@@ -76,6 +78,12 @@ export type ApiMoney = {
   total_i_owe_minor: number; total_owed_to_me_minor: number; my_balance_minor: number;
   settlements: ApiSettlement[];
 };
+export type ApiToday = {
+  date: string; week_start: string; chores: ApiChore[];
+  weekly_progress: { done: number; total: number; percent: number };
+  money: { total_i_owe_minor: number; total_owed_to_me_minor: number; my_balance_minor: number };
+  shopping: { total: number; done: number; remaining: number };
+};
 export type ApiShoppingItem = {
   id: number; room_id: number; title: string; done: boolean;
   buyer_id: number | null; completed_at: string | null;
@@ -90,6 +98,8 @@ export const api = {
     method: "POST", body: JSON.stringify({ name, email, password }),
   }, false),
   me: (signal?: AbortSignal) => request<ApiMember>("/me", { signal }),
+  updateMe: (data: { name: string; color: string }, signal?: AbortSignal) => request<ApiMember>("/me", { method: "PATCH", body: JSON.stringify(data), signal }),
+  stats: (signal?: AbortSignal) => request<ApiStats>("/me/stats", { signal }),
   rooms: (signal?: AbortSignal) => request<ApiRoom[]>("/rooms", { signal }),
   members: (roomId: number, signal?: AbortSignal) => request<ApiMember[]>(`/rooms/${roomId}/members`, { signal }),
   invite: (roomId: number, signal?: AbortSignal) => request<{ code: string; path: string }>(`/rooms/${roomId}/invite`, { signal }),
@@ -110,6 +120,7 @@ export const api = {
   expense: (roomId: number, id: number, signal?: AbortSignal) => request<ApiExpense>(`/rooms/${roomId}/expenses/${id}`, { signal }),
   addExpense: (roomId: number, data: { title: string; amount_minor: number; participant_ids: number[]; note: string }, signal?: AbortSignal) => request<ApiExpense>(`/rooms/${roomId}/expenses`, { method: "POST", body: JSON.stringify(data), signal }),
   money: (roomId: number, signal?: AbortSignal) => request<ApiMoney>(`/rooms/${roomId}/money`, { signal }),
+  today: (roomId: number, signal?: AbortSignal) => request<ApiToday>(`/rooms/${roomId}/today`, { signal }),
   reportPayment: (roomId: number, creditorId: number, amountMinor: number, signal?: AbortSignal) => request<ApiSettlement>(`/rooms/${roomId}/settlements`, {
     method: "POST", body: JSON.stringify({ creditor_id: creditorId, amount_minor: amountMinor }), signal,
   }),
@@ -149,4 +160,18 @@ export function formatTimestamp(iso: string, now = new Date()): string {
     : new Intl.DateTimeFormat("uk-UA", { timeZone: "Europe/Kyiv", day: "numeric", month: "long" }).format(date);
   const clock = new Intl.DateTimeFormat("uk-UA", { timeZone: "Europe/Kyiv", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
   return `${label}, ${clock}`;
+}
+
+/** Current Monday–Sunday strip in Kyiv; no fixed demo dates. */
+export function currentWeek(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Kyiv", year: "numeric", month: "numeric", day: "numeric" }).formatToParts(now);
+  const part = (type: string) => Number(parts.find((item) => item.type === type)!.value);
+  const current = new Date(Date.UTC(part("year"), part("month") - 1, part("day")));
+  const monday = new Date(current);
+  monday.setUTCDate(current.getUTCDate() - (current.getUTCDay() + 6) % 7);
+  return ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"].map((label, index) => {
+    const date = new Date(monday);
+    date.setUTCDate(monday.getUTCDate() + index);
+    return { label, day: date.getUTCDate(), key: date.toISOString().slice(0, 10), current: date.getTime() === current.getTime() };
+  });
 }

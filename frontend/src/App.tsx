@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
-import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement } from "./api";
+import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
+import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday } from "./api";
 import { money } from "./money";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
@@ -338,10 +338,10 @@ export default function App() {
     {error ? <><p role="alert">{error}</p><button className="primary-button" onClick={() => setRetry(retry + 1)}>Спробувати ще раз</button></> : <p role="status">Завантаження профілю…</p>}
     <button className="ghost-button" onClick={logout}>Вийти</button>
   </div></SessionPanel>;
-  return <ConnectedApp key={token} currentUser={me} onLogout={logout} />;
+  return <ConnectedApp key={token} currentUser={me} onLogout={logout} onProfileSaved={(user) => setMe(toMember(user))} />;
 }
 
-function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout: () => void }) {
+function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: Member; onLogout: () => void; onProfileSaved: (user: ApiMember) => void }) {
   const currentUserId = currentUser.id;
   const [page, setPage] = useState<Page>("today");
   const [modal, setModal] = useState<ModalName>(null);
@@ -349,7 +349,19 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const [roomId, setRoomId] = useState(0);
   const [members, setMembers] = useState<Member[]>([currentUser]);
   const [profileName, setProfileName] = useState(currentUser.name);
-  const [chores, setChores] = useState<Chore[]>([]);
+  const [todayResult, setTodayResult] = useState<{ roomId: number; data: ApiToday } | null>(null);
+  const [todayLoading, setTodayLoading] = useState(false);
+  const [todaySaving, setTodaySaving] = useState(false);
+  const [todayError, setTodayError] = useState("");
+  const [todayReload, setTodayReload] = useState(0);
+  const todayRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
+  const [stats, setStats] = useState<ApiStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+  const [statsReload, setStatsReload] = useState(0);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const profileRequest = useRef<AbortController | null>(null);
   const [filteredChores, setFilteredChores] = useState<Chore[]>([]);
   const [choresRoomId, setChoresRoomId] = useState(0);
   const [choresLoading, setChoresLoading] = useState(false);
@@ -399,6 +411,31 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const [repeat, setRepeat] = useState<"Один раз" | "Щотижня">("Один раз");
   const [rotation, setRotation] = useState<"same" | "rotate">("same");
   const [choreFilter, setChoreFilter] = useState<"all" | "mine" | "waiting" | "done">("all");
+
+  useEffect(() => { setProfileName(currentUser.name); }, [currentUser.name]);
+
+  useEffect(() => {
+    if (page !== "profile") return;
+    const controller = new AbortController();
+    profileRequest.current = controller;
+    setProfileSaving(false);
+    setProfileError("");
+    return () => { controller.abort(); profileRequest.current = null; };
+  }, [page]);
+
+  useEffect(() => {
+    if (page !== "profile" && page !== "room") return;
+    const controller = new AbortController();
+    setStats(null);
+    setStatsLoading(true);
+    setStatsError("");
+    api.stats(controller.signal).then((data) => {
+      if (!controller.signal.aborted) setStats(data);
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setStatsError(error.message);
+    }).finally(() => { if (!controller.signal.aborted) setStatsLoading(false); });
+    return () => controller.abort();
+  }, [page, roomId, statsReload]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -479,11 +516,9 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     setChoresError("");
     setChoresFormError("");
     setModal((value) => value === "chore" ? null : value);
-    const all = api.chores(roomId, "all", controller.signal);
-    Promise.all([all, choreFilter === "all" ? all : api.chores(roomId, choreFilter, controller.signal)])
-      .then(([items, filtered]) => {
+    api.chores(roomId, choreFilter, controller.signal)
+      .then((filtered) => {
         if (controller.signal.aborted) return;
-        setChores(items.map(toChore));
         setFilteredChores(filtered.map(toChore));
       }).catch((error: Error) => {
         if (!controller.signal.aborted) setChoresError(error.message);
@@ -515,9 +550,25 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     return () => { controller.abort(); detailRequest.current?.abort(); moneyRequest.current = null; };
   }, [roomId, page, moneyReload]);
 
+  useEffect(() => {
+    if (!roomId || page !== "today") return;
+    const controller = new AbortController();
+    todayRequest.current = { roomId, controller };
+    setTodayResult(null);
+    setTodayLoading(true);
+    setTodaySaving(false);
+    setTodayError("");
+    api.today(roomId, controller.signal).then((data) => {
+      if (!controller.signal.aborted) setTodayResult({ roomId, data });
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setTodayError(error.message);
+    }).finally(() => { if (!controller.signal.aborted) setTodayLoading(false); });
+    return () => { controller.abort(); todayRequest.current = null; };
+  }, [roomId, page, todayReload]);
+
   const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", memberIds: [], accent: "#7063df" };
   const roomMembers = members.filter((member) => room.memberIds.includes(member.id));
-  const roomChores = chores.filter((chore) => chore.roomId === roomId);
+  const workloads = stats?.workloads.find((item) => item.room_id === roomId)?.members;
   const roomExpenses = expenses.filter((expense) => expense.roomId === roomId);
   const roomShopping = shopping.filter((item) => item.roomId === roomId);
   const inviteUrl = invite?.roomId === roomId ? inviteLink(invite.code) : "";
@@ -528,14 +579,43 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const totalIOwe = money(summary?.total_i_owe_minor ?? 0);
   const totalOwedToMe = money(summary?.total_owed_to_me_minor ?? 0);
   const confirmedPayments = summary?.settlements.filter((item) => item.status === "paid") || [];
-  const donePercent = Math.round(
-    (roomChores.filter((item) => item.status === "done").length / Math.max(roomChores.length, 1)) *
-      100,
-  );
+  const today = todayResult?.roomId === roomId ? todayResult.data : null;
+
+  const completeTodayChore = async (id: number) => {
+    const context = todayRequest.current;
+    if (!context || context.roomId !== roomId || context.controller.signal.aborted || todaySaving) return;
+    setTodaySaving(true);
+    setTodayError("");
+    try {
+      await api.choreAction(roomId, id, "complete", context.controller.signal);
+      if (!context.controller.signal.aborted) setTodayReload((value) => value + 1);
+    } catch (error) {
+      if (!context.controller.signal.aborted) setTodayError(error instanceof Error ? error.message : "Не вдалося завершити обов’язок.");
+    } finally { if (!context.controller.signal.aborted) setTodaySaving(false); }
+  };
 
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2400);
+  };
+
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const controller = profileRequest.current;
+    if (!controller || controller.signal.aborted || profileSaving) return;
+    const name = profileName.trim();
+    if (!name) { setProfileError("Введіть ім’я."); return; }
+    setProfileSaving(true);
+    setProfileError("");
+    try {
+      const user = await api.updateMe({ name, color: currentUser.color }, controller.signal);
+      if (controller.signal.aborted) return;
+      onProfileSaved(user);
+      setMembers((items) => items.map((item) => item.id === user.id ? toMember(user) : item));
+      notify("Профіль збережено");
+    } catch (error) {
+      if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : "Не вдалося зберегти профіль.");
+    } finally { if (!controller.signal.aborted) setProfileSaving(false); }
   };
 
   const repay = async (debt: DebtView, paymentId?: number) => {
@@ -577,10 +657,6 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     } catch {
       setActionError("Не вдалося скопіювати. Скопіюйте посилання вручну.");
     }
-  };
-
-  const saveProfile = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
   };
 
   const openJoin = () => {
@@ -898,13 +974,18 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
         {roomLoading && <p className="page" role="status">Завантаження мешканців і запрошення…</p>}
         {roomError && <div className="page" role="alert"><p>{roomError}</p><button className="outline-button" onClick={() => setRoomReload((value) => value + 1)}>Спробувати ще раз</button></div>}
         {actionError && !modal && <p className="page" role="alert">{actionError}</p>}
+        {(page === "profile" || page === "room") && statsLoading && <p className="page" role="status">Завантаження статистики…</p>}
+        {(page === "profile" || page === "room") && statsError && <div className="page" role="alert"><p>{statsError}</p><button className="outline-button" onClick={() => setStatsReload((value) => value + 1)}>Спробувати ще раз</button></div>}
 
         {page === "today" && (
-          <div className="page today-page">
+          <div className="page today-page" aria-busy={todayLoading || todaySaving}>
             <div className="today-title">
               <h2>Сьогодні</h2>
               <p>Кімната {room.number}</p>
             </div>
+            {todayLoading && <p role="status">Завантаження підсумку дня…</p>}
+            {todaySaving && <p role="status">Збереження…</p>}
+            {todayError && <div role="alert"><p>{todayError}</p><button className="outline-button" disabled={todaySaving} onClick={() => setTodayReload((value) => value + 1)}>Спробувати ще раз</button></div>}
             <div className="today-grid">
               <section className="surface today-tasks">
                 <div className="today-tasks-head">
@@ -912,24 +993,23 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   <div>
                     <span>ПРОГРЕС ТИЖНЯ</span>
                     <strong>
-                      {roomChores.filter((item) => item.status === "done").length} із{" "}
-                      {roomChores.length}
+                      {today ? `${today.weekly_progress.done} із ${today.weekly_progress.total}` : "—"}
                     </strong>
                     <i>
-                      <b style={{ width: `${donePercent}%` }} />
+                      <b style={{ width: `${today?.weekly_progress.percent ?? 0}%` }} />
                     </i>
                   </div>
                 </div>
                 <div className="today-task-list">
-                  {roomChores
-                    .filter((item) => item.status !== "done")
-                    .slice(0, 3)
+                  {(today?.chores || []).map(toChore)
                     .map((chore) => (
                       <article key={chore.id}>
                         <button
                           className="round-check"
-                          title="Відкрийте обов’язки, щоб завершити справу."
-                          onClick={() => setPage("chores")}
+                          disabled={todaySaving || chore.ownerId !== currentUserId || chore.status !== "active"}
+                          aria-label="Завершити обов’язок"
+                          title={chore.status === "waiting" ? "Спочатку погодьте обов’язок на сторінці обов’язків." : "Завершити обов’язок"}
+                          onClick={() => completeTodayChore(chore.id)}
                         />
                         <div>
                           <strong>{chore.title}</strong>
@@ -941,6 +1021,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                         <Avatar member={member(chore.ownerId)} size="sm" />
                       </article>
                     ))}
+                  {today && !today.chores.length && <p>Найближчих справ немає.</p>}
                 </div>
                 <button
                   className="leopard-cta"
@@ -971,10 +1052,10 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   <Icon name="arrow" />
                   <div>
                     <span>
-                      Ви винні <strong className="red">−{totalIOwe} ₴</strong>
+                      Ви винні <strong className="red">{today ? `−${money(today.money.total_i_owe_minor)} ₴` : "—"}</strong>
                     </span>
                     <span>
-                      Вам винні <strong className="green">+{totalOwedToMe} ₴</strong>
+                      Вам винні <strong className="green">{today ? `+${money(today.money.total_owed_to_me_minor)} ₴` : "—"}</strong>
                     </span>
                   </div>
                 </button>
@@ -988,7 +1069,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   <span>
                     <strong>Покупки</strong>
                     <small>
-                      {roomShopping.filter((item) => !item.done).length} позиції ще потрібно
+                      {today ? today.shopping.remaining : "—"} позиції ще потрібно
                     </small>
                   </span>
                   <Icon name="arrow" />
@@ -1033,11 +1114,11 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
               </button>
             </div>
             <section className="week-row">
-              {["Пн|13", "Вт|14", "Ср|15", "Чт|16", "Пт|17", "Сб|18", "Нд|19"].map((day, index) => (
-                <div className={index === 1 ? "current" : ""} key={day}>
-                  <span>{day.split("|")[0]}</span>
-                  <strong>{day.split("|")[1]}</strong>
-                  {index === 1 && <i />}
+              {currentWeek().map((day) => (
+                <div className={day.current ? "current" : ""} key={day.key}>
+                  <span>{day.label}</span>
+                  <strong>{day.day}</strong>
+                  {day.current && <i />}
                 </div>
               ))}
             </section>
@@ -1298,16 +1379,12 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                     </div>
                     <div className="member-load">
                       <span>
-                        {
-                          roomChores.filter(
-                            (chore) => chore.ownerId === item.id && chore.status !== "done",
-                          ).length
-                        }{" "}
+                        {workloads?.find((entry) => entry.user_id === item.id)?.unfinished_chores ?? "—"}{" "}
                         справи
                       </span>
                       <i
                         style={{
-                          width: `${25 + roomChores.filter((chore) => chore.ownerId === item.id).length * 18}%`,
+                          width: `${workloads?.find((entry) => entry.user_id === item.id)?.workload_percent ?? 0}%`,
                         }}
                       />
                     </div>
@@ -1345,11 +1422,12 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   </span>
                 </div>
               </div>
-              <form className="profile-form" onSubmit={saveProfile}>
+              <form className="profile-form" onSubmit={saveProfile} aria-busy={profileSaving}>
                 <label>
                   Ім’я в профілі
                   <input
                     value={profileName}
+                    required maxLength={100} disabled={profileSaving}
                     onChange={(event) => setProfileName(event.target.value)}
                     placeholder="Введіть ім’я"
                   />
@@ -1358,25 +1436,23 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   <button
                     type="button"
                     className="outline-button"
+                    disabled={profileSaving}
                     onClick={() => setProfileName(currentUser.name)}
                   >
                     Скасувати
                   </button>
-                  <button className="primary-button" disabled title="Редагування профілю буде доступне незабаром.">Зберегти зміни</button>
+                  <button className="primary-button" disabled={profileSaving}>{profileSaving ? "Збереження…" : "Зберегти зміни"}</button>
                 </div>
+                {profileError && <p role="alert">{profileError}</p>}
               </form>
               <div className="profile-metrics">
                 <div>
-                  <strong>{rooms.length}</strong>
+                  <strong>{stats?.room_count ?? "—"}</strong>
                   <span>кімнати</span>
                 </div>
                 <div>
                   <strong>
-                    {
-                      chores.filter(
-                        (item) => item.ownerId === currentUserId && item.status === "done",
-                      ).length
-                    }
+                    {stats?.completed_chores ?? "—"}
                   </strong>
                   <span>справ виконано</span>
                 </div>
