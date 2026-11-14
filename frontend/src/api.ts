@@ -51,6 +51,13 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
 export type ApiMember = { id: number; name: string; email: string; color: string };
 export type ApiRoom = { id: number; number: string; accent: string; member_ids: number[]; created_at: string; updated_at: string };
 export type InvitePreview = { number: string; accent: string };
+export type ChoreFilter = "all" | "mine" | "waiting" | "done";
+export type ApiChore = {
+  id: number; room_id: number; title: string; owner_id: number; difficulty: number;
+  due_at: string; status: "waiting" | "active" | "done";
+  repeat: "once" | "weekly"; rotation: "same" | "rotate"; rotation_ids: number[];
+};
+export type ChoreCreate = Omit<ApiChore, "id" | "room_id" | "status">;
 export type ApiShoppingItem = {
   id: number; room_id: number; title: string; done: boolean;
   buyer_id: number | null; completed_at: string | null;
@@ -78,6 +85,9 @@ export const api = {
   setShoppingDone: (roomId: number, itemId: number, done: boolean, signal?: AbortSignal) => request<ApiShoppingItem>(`/rooms/${roomId}/shopping-items/${itemId}`, {
     method: "PATCH", body: JSON.stringify({ done }), signal,
   }),
+  chores: (roomId: number, filter: ChoreFilter = "all", signal?: AbortSignal) => request<ApiChore[]>(`/rooms/${roomId}/chores?filter=${filter}`, { signal }),
+  addChore: (roomId: number, data: ChoreCreate, signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores`, { method: "POST", body: JSON.stringify(data), signal }),
+  choreAction: (roomId: number, id: number, action: "accept" | "complete" | "reopen", signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores/${id}/${action}`, { method: "POST", signal }),
 };
 
 export function inviteCode(value: string): string {

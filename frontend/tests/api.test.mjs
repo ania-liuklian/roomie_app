@@ -94,6 +94,52 @@ test("shopping failures reject with actionable errors without changing the sessi
   assert.equal(getToken(), "shopping-token");
 });
 
+test("chore filters and create preserve backend enums, rotation order and ISO due dates", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const item = { id: 9, room_id: 7, title: "Clean", owner_id: 3, difficulty: 4,
+    due_at: "2026-11-18T16:00:00.000Z", status: "waiting", repeat: "weekly", rotation: "rotate", rotation_ids: [3, 1, 2] };
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(options.method === "POST" ? item : [item]);
+  };
+  setToken("chores-token");
+  for (const filter of ["all", "mine", "waiting", "done"]) {
+    const rows = await api.chores(7, filter, controller.signal);
+    assert.equal(rows[0].status, "waiting");
+    assert.equal(calls.at(-1).url, `/api/v1/rooms/7/chores?filter=${filter}`);
+  }
+  const { id, room_id, status, ...payload } = item;
+  const result = await api.addChore(7, payload, controller.signal);
+  assert.deepEqual(result, item);
+  assert.equal(calls.at(-1).url, "/api/v1/rooms/7/chores");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), payload);
+  for (const { options } of calls) {
+    assert.equal(options.headers.get("Authorization"), "Bearer chores-token");
+    assert.equal(options.signal, controller.signal);
+  }
+});
+
+test("chore actions use dedicated endpoints and return server status without generating successors locally", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json({ id: 9, status: url.endsWith("/complete") ? "done" : "active" });
+  };
+  setToken("chores-token");
+  for (const action of ["accept", "complete", "reopen"]) {
+    const result = await api.choreAction(7, 9, action);
+    assert.equal(result.status, action === "complete" ? "done" : "active");
+    assert.equal(calls.at(-1).url, `/api/v1/rooms/7/chores/9/${action}`);
+    assert.equal(calls.at(-1).options.method, "POST");
+    assert.equal(calls.at(-1).options.body, undefined);
+  }
+  globalThis.fetch = async () => Response.json({}, { status: 403 });
+  await assert.rejects(api.choreAction(7, 9, "accept"), { status: 403 });
+  globalThis.fetch = async () => Response.json({}, { status: 409 });
+  await assert.rejects(api.choreAction(7, 9, "reopen"), { status: 409 });
+});
+
 test("private 401 clears the session; login failures do not clear it", async () => {
   let expired = 0;
   const listener = () => expired++;

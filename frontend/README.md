@@ -1,6 +1,6 @@
-# Roomie frontend: API integration, steps 1–2
+# Roomie frontend: API integration, steps 1–3
 
-Auth, rooms, members, invitation joining and shopping now use the backend. Existing CSS is unchanged. Chores, money and Today are deliberately not connected yet; their existing interactions use empty in-memory state and reset on reload/logout. No seed data or business records are read from or written to localStorage.
+Auth, rooms, members, invitation joining, shopping and chores now use the backend. Existing CSS is unchanged. Money and Today are deliberately not connected yet. No seed data or business records are read from or written to localStorage.
 
 ## Run locally (PowerShell)
 
@@ -38,7 +38,18 @@ For joining without an invite URL, use “Приєднатися до кімна
 
 The list refreshes when entering Shopping, switching rooms, or retrying. Mutations use the existing JWT client and are blocked while saving to prevent duplicate submissions. Leaving the screen or room cancels outstanding requests; the next visit reloads server state, including writes that the server may have completed before cancellation. The UI has no edit/delete controls, so none were added. Today remains for step 5.
 
-`formatTimestamp()` prepares Kyiv-local Ukrainian labels such as “Сьогодні, 19:00” from ISO timestamps for subsequent steps. Rooms and shopping have no displayed date field in the current UI.
+## Test step 3: chores
+
+1. Open Chores. Test All, Mine, Waiting for approval, and Done. Each uses the corresponding API filter; Waiting shows only chores assigned to the signed-in user.
+2. Create a one-time chore assigned to yourself: it should be `active`. Assign one to another member: it should be `waiting`; only that assignee can accept it, making it `active`.
+3. Complete an active chore: it becomes `done`. A waiting chore cannot be completed before acceptance; other people's acceptance/completion controls are disabled.
+4. Create a weekly rotating chore with the assignee included in the selected people. Complete it and select All: the backend-generated next occurrence should appear one calendar week later, with the next assignee and `waiting` status. The frontend never generates successors or advances rotation itself.
+5. Undo completion using the existing check button. The API reopens the chore and removes an untouched successor; if that successor was already accepted/changed, the API returns a conflict and the UI shows an error without a local status change.
+6. Reload, switch rooms/filters rapidly, and test an unavailable backend. Loading/error/retry states should appear; older requests must not replace the current room/filter. Failed creates retain the form. Leaving a screen cancels its requests; re-entry reloads server state.
+
+Due dates use a native date/time picker in the existing form, interpreted in the device's local timezone and sent as an ISO UTC instant. `formatTimestamp()` displays Kyiv-local Ukrainian strings such as “Сьогодні, 19:00”. API `once`/`weekly` map to “Один раз”/“Щотижня”; `waiting`/`active`/`done` are preserved exactly in state and CSS classes. There are no working edit/delete controls in the current chore UI (the dots button has no handler), so no new controls were added.
+
+**Known leftover for step 5:** Today's progress and nearest chores still read the cached, unfiltered chore list loaded when visiting Chores. Before that visit they may be empty, and progress counts all cached occurrences rather than the current week. They do not use `GET /today` yet. The Today check button now opens Chores instead of performing a local-only completion. The static week strip on Chores is unchanged. Step 5 must connect Today to its authoritative API summary; money remains for step 4.
 
 ```powershell
 npx.cmd tsc --noEmit

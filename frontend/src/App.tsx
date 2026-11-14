@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { api, getToken, setToken, inviteCode, inviteLink, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
+import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
 type ModalName = "invite" | "join" | "room" | "chore" | "expense" | "shopping" | null;
@@ -246,6 +246,12 @@ function toShoppingItem(item: ApiShoppingItem): ShoppingItem {
   return { id: item.id, roomId: item.room_id, title: item.title, done: item.done, buyerId: item.buyer_id ?? undefined };
 }
 
+function toChore(item: ApiChore): Chore {
+  return { id: item.id, roomId: item.room_id, title: item.title, ownerId: item.owner_id,
+    difficulty: item.difficulty, due: formatTimestamp(item.due_at), status: item.status,
+    repeat: item.repeat === "weekly" ? "Щотижня" : "Один раз", rotation: item.rotation, rotationIds: item.rotation_ids };
+}
+
 function SessionPanel({ children }: { children: React.ReactNode }) {
   return <div className="modal-backdrop"><section className="modal">
     <header><div><h2>Roomie</h2><p>Ваш спільний простір</p></div></header>
@@ -333,8 +339,16 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
   const [roomId, setRoomId] = useState(0);
   const [members, setMembers] = useState<Member[]>([currentUser]);
   const [profileName, setProfileName] = useState(currentUser.name);
-  // Chores and money are connected in subsequent steps; no persisted demo data.
+  // Money is connected in the next step; no persisted demo data.
   const [chores, setChores] = useState<Chore[]>([]);
+  const [filteredChores, setFilteredChores] = useState<Chore[]>([]);
+  const [choresRoomId, setChoresRoomId] = useState(0);
+  const [choresLoading, setChoresLoading] = useState(false);
+  const [choresError, setChoresError] = useState("");
+  const [choresFormError, setChoresFormError] = useState("");
+  const [choresSaving, setChoresSaving] = useState(false);
+  const [choresReload, setChoresReload] = useState(0);
+  const choresRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
@@ -435,6 +449,29 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     return () => { controller.abort(); shoppingRequest.current = null; };
   }, [roomId, page, shoppingReload]);
 
+  useEffect(() => {
+    if (!roomId || page !== "chores") return;
+    const controller = new AbortController();
+    choresRequest.current = { roomId, controller };
+    setChoresRoomId(roomId);
+    setFilteredChores([]);
+    setChoresLoading(true);
+    setChoresSaving(false);
+    setChoresError("");
+    setChoresFormError("");
+    setModal((value) => value === "chore" ? null : value);
+    const all = api.chores(roomId, "all", controller.signal);
+    Promise.all([all, choreFilter === "all" ? all : api.chores(roomId, choreFilter, controller.signal)])
+      .then(([items, filtered]) => {
+        if (controller.signal.aborted) return;
+        setChores(items.map(toChore));
+        setFilteredChores(filtered.map(toChore));
+      }).catch((error: Error) => {
+        if (!controller.signal.aborted) setChoresError(error.message);
+      }).finally(() => { if (!controller.signal.aborted) setChoresLoading(false); });
+    return () => { controller.abort(); choresRequest.current = null; };
+  }, [roomId, page, choreFilter, choresReload]);
+
   const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", memberIds: [], accent: "#7063df" };
   const roomMembers = members.filter((member) => room.memberIds.includes(member.id));
   const roomChores = chores.filter((chore) => chore.roomId === roomId);
@@ -454,13 +491,6 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     (roomChores.filter((item) => item.status === "done").length / Math.max(roomChores.length, 1)) *
       100,
   );
-  const filteredChores = roomChores.filter((chore) => {
-    if (choreFilter === "mine") return chore.ownerId === currentUserId;
-    if (choreFilter === "waiting")
-      return chore.status === "waiting" && chore.ownerId === currentUserId;
-    if (choreFilter === "done") return chore.status === "done";
-    return true;
-  });
 
   const notify = (message: string) => {
     setToast(message);
@@ -534,28 +564,45 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
     } finally { setActionBusy(false); }
   };
 
-  const addChore = (event: FormEvent<HTMLFormElement>) => {
+  const addChore = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const context = choresRequest.current;
+    if (!context || context.roomId !== roomId || context.controller.signal.aborted || choresSaving) return;
     const data = new FormData(event.currentTarget);
+    const title = String(data.get("title")).trim();
     const ownerId = Number(data.get("owner"));
-    const rotationIds = rotation === "rotate" ? data.getAll("rotationIds").map(Number) : [ownerId];
-    setChores([
-      ...chores,
-      {
-        id: Date.now(),
-        roomId,
-        title: String(data.get("title")),
-        ownerId,
-        difficulty,
-        due: String(data.get("due")),
-        status: ownerId === currentUserId ? "active" : "waiting",
-        repeat,
-        rotation,
-        rotationIds: rotationIds.length ? rotationIds : room.memberIds,
-      },
-    ]);
-    setModal(null);
-    notify("Обов’язок створено");
+    const due = new Date(String(data.get("due")));
+    const rotate = repeat === "Щотижня" && rotation === "rotate";
+    const rotationIds = rotate ? data.getAll("rotationIds").map(Number) : [ownerId];
+    if (!title || Number.isNaN(due.getTime())) { setChoresFormError("Введіть назву та дату виконання."); return; }
+    if (!rotationIds.includes(ownerId)) { setChoresFormError("Додайте призначеного мешканця до черги."); return; }
+    setChoresSaving(true);
+    setChoresFormError("");
+    try {
+      await api.addChore(roomId, { title, owner_id: ownerId, difficulty, due_at: due.toISOString(),
+        repeat: repeat === "Щотижня" ? "weekly" : "once", rotation: rotate ? "rotate" : "same", rotation_ids: rotationIds }, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      setModal(null);
+      setChoresReload((value) => value + 1);
+      notify("Обов’язок створено");
+    } catch (error) {
+      if (!context.controller.signal.aborted) setChoresFormError(error instanceof Error ? error.message : "Не вдалося створити обов’язок.");
+    } finally { if (!context.controller.signal.aborted) setChoresSaving(false); }
+  };
+
+  const changeChore = async (chore: Chore, action: "accept" | "complete" | "reopen") => {
+    const context = choresRequest.current;
+    if (!context || context.roomId !== chore.roomId || context.controller.signal.aborted || choresSaving) return;
+    setChoresSaving(true);
+    setChoresError("");
+    try {
+      await api.choreAction(chore.roomId, chore.id, action, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      // Reload the authoritative list, including any generated/removed successor.
+      setChoresReload((value) => value + 1);
+    } catch (error) {
+      if (!context.controller.signal.aborted) setChoresError(error instanceof Error ? error.message : "Не вдалося оновити обов’язок.");
+    } finally { if (!context.controller.signal.aborted) setChoresSaving(false); }
   };
 
   const addExpense = (event: FormEvent<HTMLFormElement>) => {
@@ -820,13 +867,8 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                       <article key={chore.id}>
                         <button
                           className="round-check"
-                          onClick={() =>
-                            setChores(
-                              chores.map((item) =>
-                                item.id === chore.id ? { ...item, status: "done" } : item,
-                              ),
-                            )
-                          }
+                          title="Відкрийте обов’язки, щоб завершити справу."
+                          onClick={() => setPage("chores")}
                         />
                         <div>
                           <strong>{chore.title}</strong>
@@ -924,7 +966,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   Виконані
                 </button>
               </div>
-              <button className="primary-button" onClick={() => setModal("chore")}>
+              <button className="primary-button" disabled={choresLoading || choresSaving || choresRoomId !== roomId || roomLoading || !!roomError} onClick={() => { setChoresFormError(""); setModal("chore"); }}>
                 <Icon name="plus" size={18} />
                 Новий обов’язок
               </button>
@@ -938,20 +980,18 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                 </div>
               ))}
             </section>
-            <section className="surface task-board">
-              {filteredChores.map((chore) => (
+            <section className="surface task-board" aria-busy={choresLoading || choresSaving}>
+              {(choresLoading || choresRoomId !== roomId) && <p role="status">Завантаження обов’язків…</p>}
+              {choresRoomId === roomId && choresError && <div role="alert"><p>{choresError}</p><button className="outline-button" disabled={choresSaving} onClick={() => setChoresReload((value) => value + 1)}>Спробувати ще раз</button></div>}
+              {choresSaving && <p role="status">Збереження…</p>}
+              {choresRoomId === roomId && !choresLoading && !choresError && !filteredChores.length && <p>Немає обов’язків за цим фільтром.</p>}
+              {choresRoomId === roomId && !choresLoading && filteredChores.map((chore) => (
                 <article className={`full-task ${chore.status}`} key={chore.id}>
                   <button
                     className="large-check"
-                    onClick={() =>
-                      setChores(
-                        chores.map((item) =>
-                          item.id === chore.id
-                            ? { ...item, status: item.status === "done" ? "active" : "done" }
-                            : item,
-                        ),
-                      )
-                    }
+                    disabled={choresSaving || chore.ownerId !== currentUserId || chore.status === "waiting"}
+                    aria-label={chore.status === "done" ? "Повернути до виконання" : "Завершити обов’язок"}
+                    onClick={() => changeChore(chore, chore.status === "done" ? "reopen" : "complete")}
                   >
                     {chore.status === "done" && <Icon name="check" size={15} />}
                   </button>
@@ -981,14 +1021,8 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                   {chore.status === "waiting" && chore.ownerId === currentUserId ? (
                     <button
                       className="approve-button"
-                      onClick={() => {
-                        setChores(
-                          chores.map((item) =>
-                            item.id === chore.id ? { ...item, status: "active" } : item,
-                          ),
-                        );
-                        notify("Обов’язок погоджено");
-                      }}
+                      disabled={choresSaving}
+                      onClick={() => changeChore(chore, "accept")}
                     >
                       Погодити
                     </button>
@@ -1339,18 +1373,18 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
         <Modal
           title="Новий обов’язок"
           note="Призначена людина має його погодити."
-          onClose={() => setModal(null)}
+          onClose={() => { if (!choresSaving) setModal(null); }}
           wide
         >
-          <form className="form" onSubmit={addChore}>
+          <form className="form" onSubmit={addChore} aria-busy={choresSaving}>
             <label>
               Що потрібно зробити?
-              <input name="title" required placeholder="Наприклад, помити холодильник" />
+              <input name="title" required maxLength={200} disabled={choresSaving} placeholder="Наприклад, помити холодильник" />
             </label>
             <div className="form-grid">
               <label>
                 Хто виконує
-                <select name="owner">
+                <select name="owner" defaultValue={currentUserId} disabled={choresSaving}>
                   {roomMembers.map((item) => (
                     <option value={item.id} key={item.id}>
                       {item.name}
@@ -1359,15 +1393,15 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                 </select>
               </label>
               <label>
-                Коли виконати
-                <input name="due" required placeholder="Завтра, 18:00" />
+                Коли виконати (час пристрою)
+                <input name="due" type="datetime-local" required disabled={choresSaving} />
               </label>
             </div>
-            <fieldset>
+            <fieldset disabled={choresSaving}>
               <legend>Складність</legend>
               <Stars value={difficulty} onChange={setDifficulty} />
             </fieldset>
-            <fieldset>
+            <fieldset disabled={choresSaving}>
               <legend>Повторення</legend>
               <div className="choice-row">
                 <label className={repeat === "Один раз" ? "selected" : ""}>
@@ -1389,7 +1423,7 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
               </div>
             </fieldset>
             {repeat === "Щотижня" && (
-              <fieldset className="rotation-field">
+              <fieldset className="rotation-field" disabled={choresSaving}>
                 <legend>Хто виконує наступного тижня?</legend>
                 <div className="choice-row">
                   <label className={rotation === "same" ? "selected" : ""}>
@@ -1434,11 +1468,12 @@ function ConnectedApp({ currentUser, onLogout }: { currentUser: Member; onLogout
                 )}
               </fieldset>
             )}
+            {choresFormError && <p role="alert">{choresFormError}</p>}
             <div className="modal-actions">
-              <button type="button" className="outline-button" onClick={() => setModal(null)}>
+              <button type="button" className="outline-button" disabled={choresSaving} onClick={() => setModal(null)}>
                 Скасувати
               </button>
-              <button className="primary-button">Створити обов’язок</button>
+              <button className="primary-button" disabled={choresSaving}>{choresSaving ? "Створення…" : "Створити обов’язок"}</button>
             </div>
           </form>
         </Modal>
