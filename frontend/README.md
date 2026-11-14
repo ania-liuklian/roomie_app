@@ -70,7 +70,11 @@ The list refreshes when entering Shopping, switching rooms, or retrying. Mutatio
 5. Undo completion using the existing check button. The API reopens the chore and removes an untouched successor; if that successor was already accepted/changed, the API returns a conflict and the UI shows an error without a local status change.
 6. Reload, switch rooms/filters rapidly, and test an unavailable backend. Loading/error/retry states should appear; older requests must not replace the current room/filter. Failed creates retain the form. Leaving a screen cancels its requests; re-entry reloads server state.
 
-Due dates use a native date/time picker in the existing form, interpreted in the device's local timezone and sent as an ISO UTC instant. `formatTimestamp()` displays Kyiv-local Ukrainian strings such as “Сьогодні, 19:00”. API `once`/`weekly` map to “Один раз”/“Щотижня”; `waiting`/`active`/`done` are preserved exactly in state and CSS classes. There are no working edit/delete controls in the current chore UI (the dots button has no handler), so no new controls were added.
+Due dates use a native date/time picker in the existing form, interpreted in the device's local timezone and sent as an ISO UTC instant. `formatTimestamp()` displays Kyiv-local Ukrainian strings such as “Сьогодні, 19:00”. API `once`/`weekly` map to “Один раз”/“Щотижня”; `waiting`/`active`/`done` are preserved exactly in state and CSS classes. The dots menu now opens Edit or Delete for incomplete chores. Edit changes title, difficulty, due date and assignee; Delete requires confirmation. All room members may manage incomplete chores; only assignees accept/complete/reopen them. Completed chores must be reopened before editing or deleting.
+
+For a weekly chore, edits apply to that occurrence and the next occurrence generated when it is completed; completed history is not rewritten. Reassigning a rotating chore to a person outside its queue replaces the old assignee's queue slot. Deleting an incomplete weekly occurrence (including an upcoming one) removes its rotation rows and generates no successor; earlier completed occurrences remain. Reopening and recompleting an earlier occurrence explicitly can generate a new successor again.
+
+Menu verification: test editing all four fields, Cancel without saving, delete confirmation Cancel/confirm, failed saves/deletes with the backend stopped, and a second room member managing the chore. Complete a weekly chore, then edit/delete its upcoming occurrence and verify the completed history remains. Try a nonmember's API token: PATCH and DELETE must return 403. The list reloads after success, menu closes on outside click/Escape, and pending requests are canceled on room/filter changes.
 
 Today now uses its own API summary, independently of previously visited screens. The chore week strip also uses current Kyiv calendar dates instead of fixed demo dates.
 
@@ -106,7 +110,7 @@ From `frontend`:
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs
 ```
 
 From `backend`:
@@ -119,7 +123,7 @@ Backend tests use temporary SQLite files and test-only JWT secrets; they do not 
 
 ## Remaining inactive UI / limitations
 
-- The notification bell and chore dots button have no actions. The existing UI exposes no edit/delete controls for chores, shopping or expenses, although the backend supports them.
+- The notification bell has no action. Shopping and expenses have no edit/delete controls, although the backend supports them. Chores now use their dots menu.
 - Room accent and initials metadata remain unused by the fixed room design and character avatars.
 - Backend room edit/delete/leave/ownership transfer remain unimplemented. No polling or push updates: revisit a screen or reload to see another member's changes.
 

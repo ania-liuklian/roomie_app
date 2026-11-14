@@ -120,6 +120,8 @@ export const api = {
   }),
   chores: (roomId: number, filter: ChoreFilter = "all", signal?: AbortSignal) => request<ApiChore[]>(`/rooms/${roomId}/chores?filter=${filter}`, { signal }),
   addChore: (roomId: number, data: ChoreCreate, signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores`, { method: "POST", body: JSON.stringify(data), signal }),
+  editChore: (roomId: number, id: number, data: Pick<ChoreCreate, "title" | "difficulty" | "due_at" | "owner_id">, signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores/${id}`, { method: "PATCH", body: JSON.stringify(data), signal }),
+  deleteChore: (roomId: number, id: number, signal?: AbortSignal) => request<void>(`/rooms/${roomId}/chores/${id}`, { method: "DELETE", signal }),
   choreAction: (roomId: number, id: number, action: "accept" | "complete" | "reopen", signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores/${id}/${action}`, { method: "POST", signal }),
   expenses: (roomId: number, signal?: AbortSignal) => request<ApiExpense[]>(`/rooms/${roomId}/expenses`, { signal }),
   expense: (roomId: number, id: number, signal?: AbortSignal) => request<ApiExpense>(`/rooms/${roomId}/expenses/${id}`, { signal }),

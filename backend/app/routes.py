@@ -144,9 +144,7 @@ def install_routes(app, sessions, current_user):
                 raise
 
     def manage_chore(db, room_id, user_id, chore):
-        member = membership(db, room_id, user_id)
-        if chore.created_by_id != user_id and member.role != "owner":
-            raise HTTPException(403, "Only the creator or room owner can edit this chore")
+        membership(db, room_id, user_id)
         if chore.status == "done":
             raise HTTPException(409, "Reopen a completed chore before editing")
 
@@ -195,6 +193,8 @@ def install_routes(app, sessions, current_user):
             setattr(chore, key, value)
         membership(db, room_id, chore.owner_id)
         if chore.owner_id != old_owner:
+            if "rotation_ids" not in data.model_fields_set and chore.rotation == "rotate" and chore.owner_id not in ids:
+                ids = [chore.owner_id if uid == old_owner else uid for uid in ids]
             chore.status = "active" if chore.owner_id == user.id else "waiting"
             chore.accepted_at = utcnow() if chore.status == "active" else None
         set_rotation(db, chore, ids)
@@ -206,8 +206,6 @@ def install_routes(app, sessions, current_user):
         membership(db, room_id, user.id)
         chore = resource(db, Chore, room_id, item_id)
         manage_chore(db, room_id, user.id, chore)
-        if chore.previous_chore_id is not None:
-            raise HTTPException(409, "Cannot delete recurrence history; edit this occurrence instead")
         db.execute(delete(ChoreRotationMember).where(ChoreRotationMember.chore_id == chore.id))
         db.delete(chore)
         return Response(status_code=204)

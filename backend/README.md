@@ -54,7 +54,7 @@ Frontend checks, from `frontend` (see its README for browser checks):
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs
 ```
 
 ## Implemented API
@@ -85,7 +85,7 @@ Below, `R` means `/api/v1/rooms/{room_id}`. All routes require authentication an
 | Methods | Path | Behavior |
 |---|---|---|
 | GET, POST | `R/chores` | List (filter `all`, `mine`, `waiting`, `done`) / create. |
-| PATCH, DELETE | `R/chores/{id}` | Creator or room owner; preserve completed recurrence history. |
+| PATCH, DELETE | `R/chores/{id}` | Any room member; incomplete occurrences only, preserve completed history. |
 | POST | `R/chores/{id}/accept` | Assignee only; waiting to active, repeated acceptance is safe. |
 | POST | `R/chores/{id}/complete` | Assignee only; active to done, repeated completion is safe. |
 | POST | `R/chores/{id}/reopen` | Assignee only; undo completion, removing an untouched successor atomically. |
@@ -107,7 +107,9 @@ Example chore create:
 {"title":"Clean kitchen","owner_id":1,"difficulty":3,"due_at":"2026-11-18T18:00:00+02:00","repeat":"weekly","rotation":"rotate","rotation_ids":[1,2,3]}
 ```
 
-Self-assignment starts active; assignments to others start waiting. Only assignees can accept/complete/reopen. Weekly completion creates exactly one waiting successor, preserving the completed occurrence. Advance the scheduled due date by one Kyiv calendar week (including DST changes); rotate through the supplied ordered IDs, skipping people who no longer belong to the room. Rotation must include the current assignee. Each successor requires acceptance, including when the same assignee continues. `once` or `same` normalizes rotation IDs to the assignee. Completed chores and generated successors cannot be deleted; reopen or edit the permitted occurrence instead. Reopen rejects a successor that has been edited, accepted or completed.
+Self-assignment starts active; assignments to others start waiting. Only assignees can accept/complete/reopen. Weekly completion creates exactly one waiting successor, preserving the completed occurrence. Advance the scheduled due date by one Kyiv calendar week (including DST changes); rotate through the supplied ordered IDs, skipping people who no longer belong to the room. Rotation must include the current assignee. Each successor requires acceptance, including when the same assignee continues. `once` or `same` normalizes rotation IDs to the assignee. Any room member may edit/delete an incomplete occurrence; nonmembers get 403. Completed occurrences return 409 until reopened. Reopen rejects a successor that has been edited, accepted or completed.
+
+Editing a weekly occurrence changes the fields inherited by its next successor when it is completed; it never rewrites completed predecessors. Reassigning to a member absent from the rotation replaces the previous assignee's slot unless explicit rotation IDs were supplied. Reassignment to someone other than the acting user resets acceptance to waiting. Deleting an incomplete generated successor is permitted: remove its rotation rows, retain its completed predecessor and create no further occurrence. Explicitly reopening/recompleting an earlier chore can generate a successor again. Concurrent deletion/completion is serialized: either deletion wins and completion returns 404, or completion wins and deletion returns 409 with both historical and upcoming records intact. No migration is required for these changes.
 
 Example expense create (100 UAH split between two members):
 
@@ -163,7 +165,8 @@ Today returns `date`, `week_start`, `chores`, `weekly_progress: {done,total,perc
 | Edit profile name / cancel | Local draft / reset from `GET /me`; cancel needs no mutation | Local |
 | Save profile | `PATCH /me` for name/color | Now |
 | Open/close modal, click backdrop, cancel form, dismiss detail | Local only | Local |
-| Notification bell, chore dots, static week strip | Currently no handlers; no API call | Local |
+| Chore dots | Edit through PATCH; confirm deletion through DELETE | Now |
+| Notification bell / week strip | Bell is inactive; strip renders current Kyiv dates | Local |
 
 The existing UI permits checks on waiting chores and other people's chores. The backend enforces assignee-only `waiting → active → done` transitions; frontend integration must reflect these permissions. Reopening a recurring completion atomically removes an untouched successor; it returns 409 if the successor has already changed.
 
@@ -173,7 +176,7 @@ Chore/expense/shopping edit/delete, repayment cancellation and profile changes a
 
 | Action | Proposed endpoint and rules |
 |---|---|
-| Edit/delete chore | `PATCH R/chores/{id}`, `DELETE R/chores/{id}`; creator or room owner; assignee may change state through dedicated actions. Preserve completed recurrence history. |
+| Edit/delete chore | `PATCH R/chores/{id}`, `DELETE R/chores/{id}`; any room member for incomplete occurrences. Assignee changes state through dedicated actions. Preserve completed history. |
 | Edit/delete expense | `PATCH R/expenses/{id}`, `DELETE R/expenses/{id}`; payer only, recompute shares atomically; reject if this would invalidate a pending or confirmed repayment. |
 | Edit/delete shopping item | `PATCH R/shopping-items/{id}`, `DELETE R/shopping-items/{id}`; room members. |
 | Rename/recolor room | `PATCH R`; room owner only. |
@@ -210,7 +213,7 @@ Expense edits/deletes that change a pair with any confirmed repayment are conser
 
 Never log expense notes, request/response bodies, passwords or bearer tokens. SQLAlchemy uses `hide_parameters=True`, SQL echo is disabled, and validation responses omit submitted inputs. Do not enable SQL debug/echo logging or body-capturing middleware/APM. Notes are intended only for authorized room responses and storage, not diagnostics. Uvicorn access logs contain method/path/status, not request bodies.
 
-Frontend integration is complete for Today, chores, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell and chore dots have no actions. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
+Frontend integration includes Today, chores and their edit/delete menu, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell has no action. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
 
 `PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. The frontend profile picker previews a local draft and submits name and avatar options together through the existing Save button.
 

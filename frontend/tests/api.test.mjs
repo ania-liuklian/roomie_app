@@ -140,6 +140,32 @@ test("chore actions use dedicated endpoints and return server status without gen
   await assert.rejects(api.choreAction(7, 9, "reopen"), { status: 409 });
 });
 
+test("chore edit/delete use authenticated room-scoped routes and handle conflicts", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const payload = { title: "Changed", difficulty: 5, owner_id: 3, due_at: "2026-11-18T16:00:00Z" };
+  setToken("chore-editor-token");
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return options.method === "DELETE" ? new Response(null, { status: 204 }) : Response.json({ id: 9, ...payload });
+  };
+  assert.equal((await api.editChore(7, 9, payload, controller.signal)).title, "Changed");
+  assert.equal(await api.deleteChore(7, 9, controller.signal), undefined);
+  assert.deepEqual(calls.map((call) => [call.url, call.options.method]), [
+    ["/api/v1/rooms/7/chores/9", "PATCH"], ["/api/v1/rooms/7/chores/9", "DELETE"],
+  ]);
+  assert.deepEqual(JSON.parse(calls[0].options.body), payload);
+  for (const { options } of calls) {
+    assert.equal(options.headers.get("Authorization"), "Bearer chore-editor-token");
+    assert.equal(options.signal, controller.signal);
+  }
+  for (const status of [403, 409]) {
+    globalThis.fetch = async () => Response.json({}, { status });
+    await assert.rejects(api.editChore(7, 9, payload), { status });
+    await assert.rejects(api.deleteChore(7, 9), { status });
+  }
+});
+
 test("expenses use integer amounts and participants without a forged payer", async () => {
   const calls = [];
   const controller = new AbortController();

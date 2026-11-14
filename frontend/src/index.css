@@ -4467,3 +4467,28 @@ body {
   cursor: wait;
   opacity: 0.6;
 }
+
+/* Chore actions only; keep the existing board and dialog styles. */
+.chore-controls {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 8px;
+}
+.chore-actions { position: relative; }
+.task-board:has(.chore-menu) { overflow: visible; }
+.chore-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  min-width: 170px;
+  padding: 8px;
+  border: 1px solid #e8dad5;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(83, 53, 43, 0.12);
+}
+.chore-menu button { display: block; width: 100%; text-align: left; }
+.chore-menu p { margin: 5px; font-size: 11px; color: #6f5a52; }
+.chore-menu button:disabled { opacity: 0.5; cursor: default; }

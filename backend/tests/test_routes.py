@@ -132,8 +132,8 @@ def test_chore_edit_delete_and_validation(api):
     request, _ = api
     item = chore(api, uid=2)
     path = f"/1/chores/{item['id']}"
-    assert request("PATCH", path, 3, json={"title": "New"}).status_code == 403
-    assert request("DELETE", path, 3).status_code == 403
+    assert request("PATCH", path, 5, json={"title": "New"}).status_code == 403
+    assert request("DELETE", path, 5).status_code == 403
     changed = request("PATCH", path, 1, json={"title": "Changed", "owner_id": 3})
     assert changed.status_code == 200 and changed.json()["status"] == "waiting"
     assert changed.json()["rotation_ids"] == [3]
@@ -159,9 +159,57 @@ def test_completed_chore_history_is_preserved(api):
     assert request("PATCH", path, json={"title": "New"}).status_code == 409
     assert request("DELETE", path).status_code == 409
     successor = next(c for c in request("GET", "/1/chores").json() if c["previous_chore_id"])
-    assert request("DELETE", f"/1/chores/{successor['id']}").status_code == 409
     assert request("PATCH", f"/1/chores/{successor['id']}", json={"title": "Edited"}).status_code == 200
     assert request("POST", path + "/reopen").status_code == 409
+    assert request("DELETE", f"/1/chores/{successor['id']}", 3).status_code == 204
+    remaining = request("GET", "/1/chores").json()
+    assert len(remaining) == 1 and remaining[0]["status"] == "done"
+
+
+def test_member_weekly_edit_reassignment_rotation_and_deleting_next_occurrence(api):
+    request, _ = api
+    item = chore(api, repeat="weekly", rotation="rotate", rotation_ids=[1, 2, 3])
+    path = f"/1/chores/{item['id']}"
+    edited = request("PATCH", path, 3, json={"title": "Updated", "difficulty": 5,
+        "due_at": "2026-11-18T18:00:00+02:00", "owner_id": 4})
+    assert edited.status_code == 200
+    assert edited.json()["status"] == "waiting" and edited.json()["rotation_ids"] == [4, 2, 3]
+    assert request("PATCH", path, 3, json={"owner_id": 5}).status_code == 403
+    assert request("GET", "/1/chores").json()[0]["owner_id"] == 4
+    request("POST", path + "/accept", 4)
+    request("POST", path + "/complete", 4)
+    rows = request("GET", "/1/chores").json()
+    successor = next(row for row in rows if row["previous_chore_id"] == item["id"])
+    assert successor["title"] == "Updated" and successor["difficulty"] == 5
+    assert successor["owner_id"] == 2 and successor["status"] == "waiting"
+    assert datetime.fromisoformat(successor["due_at"]) == datetime(2026, 11, 25, 16, tzinfo=timezone.utc)
+    assert request("PATCH", path, 3, json={"title": "Do not propagate"}).status_code == 409
+    assert request("DELETE", path, 3).status_code == 409
+    assert request("DELETE", f"/1/chores/{successor['id']}", 3).status_code == 204
+    rows = request("GET", "/1/chores").json()
+    assert len(rows) == 1 and rows[0]["status"] == "done"
+    assert rows[0]["title"] == "Updated"
+
+
+def test_delete_uncompleted_weekly_chore_does_not_generate_next(api):
+    request, _ = api
+    item = chore(api, repeat="weekly")
+    assert request("DELETE", f"/1/chores/{item['id']}", 2).status_code == 204
+    assert request("GET", "/1/chores").json() == []
+    assert request("POST", f"/1/chores/{item['id']}/complete").status_code == 404
+
+
+def test_concurrent_weekly_complete_and_delete_preserve_history_or_delete_atomically(api):
+    request, _ = api
+    item = chore(api, repeat="weekly")
+    path = f"/1/chores/{item['id']}"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        complete = pool.submit(request, "POST", path + "/complete", 1)
+        delete = pool.submit(request, "DELETE", path, 2)
+        statuses = complete.result().status_code, delete.result().status_code
+    assert statuses in [(200, 409), (404, 204)]
+    rows = request("GET", "/1/chores").json()
+    assert len(rows) == (2 if statuses[0] == 200 else 0)
 
 
 def test_shopping_crud_completion_and_undo(api):
