@@ -54,7 +54,7 @@ Frontend checks, from `frontend` (see its README for browser checks):
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs tests/notifications.test.mjs
 ```
 
 ## Implemented API
@@ -169,7 +169,8 @@ Today returns `date`, `week_start`, `chores`, `weekly_progress: {done,total,perc
 | Save profile | `PATCH /me` for name/color | Now |
 | Open/close modal, click backdrop, cancel form, dismiss detail | Local only | Local |
 | Chore dots | Edit through PATCH; confirm deletion through DELETE | Now |
-| Notification bell / week strip | Bell is inactive; strip renders current Kyiv dates | Local |
+| Notification bell | Dropdown, read actions and 30-second polling | Now |
+| Week strip | Renders current Kyiv dates | Local |
 
 The existing UI permits checks on waiting chores and other people's chores. The backend enforces assignee-only `waiting → active → done` transitions; frontend integration must reflect these permissions. Reopening a recurring completion atomically removes an untouched successor; it returns 409 if the successor has already changed.
 
@@ -216,7 +217,7 @@ Expense edits/deletes that change a pair with any confirmed repayment are conser
 
 Never log expense notes, request/response bodies, passwords or bearer tokens. SQLAlchemy uses `hide_parameters=True`, SQL echo is disabled, and validation responses omit submitted inputs. Do not enable SQL debug/echo logging or body-capturing middleware/APM. Notes are intended only for authorized room responses and storage, not diagnostics. Uvicorn access logs contain method/path/status, not request bodies.
 
-Frontend integration includes Today, chores and their edit/delete menu, shopping, expenses, money, repayments and profile save/statistics. Room edit/delete/leave/ownership-transfer remain unimplemented. The notification bell has no action. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
+Frontend integration includes Today, chores and their edit/delete menu, shopping, expenses, money, repayments, profile save/statistics and the notification bell. Room edit/delete/leave/ownership-transfer remain unimplemented. See `../frontend/README.md` for the full inactive-UI list and browser verification checklist.
 
 `PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. The frontend profile picker previews a local draft and submits name and avatar options together through the existing Save button.
 
@@ -249,9 +250,9 @@ To test customization before the picker is built, authorize in `/docs` and call 
 
 Reload the frontend, then inspect header/sidebar/profile, members, chores and money. Reset with `{"color":"#BF8790","eye_style":"plain","gaze":"straight"}`. The profile picker now provides the same options with live preview and Save/Cancel; see the frontend README for its browser checklist. No further migration is needed for stage 2.
 
-## Notifications: stage 1 (backend only)
+## Notifications
 
-Notifications are in-app database records; no email, push or external messages are sent. The frontend bell is unchanged in this stage.
+Notifications are in-app database records; no email, push or external messages are sent. The frontend bell shows unread state, a dropdown with the latest 100 records, per-item read and read-all actions, and polling every 30 seconds while signed in. It also refreshes on opening and after successful writes. Logout cancels its polling and requests. The full unread count is independent of the visible page. See the frontend README for browser checks.
 
 All routes require a JWT and use prefix `/api/v1`:
 

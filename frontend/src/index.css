@@ -4492,3 +4492,61 @@ body {
 .chore-menu button { display: block; width: 100%; text-align: left; }
 .chore-menu p { margin: 5px; font-size: 11px; color: #6f5a52; }
 .chore-menu button:disabled { opacity: 0.5; cursor: default; }
+
+/* In-app notifications: use the existing bell, palette and button styles. */
+.notification-bell { position: relative; }
+.notification-bell .notification:not(.has-unread)::after { display: none; }
+.notification-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  width: 360px;
+  max-height: min(520px, 75vh);
+  overflow-y: auto;
+  border: 1px solid #e8dad5;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #53352b;
+  box-shadow: 0 8px 24px rgba(83, 53, 43, 0.12);
+  text-align: left;
+}
+.notification-dropdown > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid #e8dad5;
+}
+.notification-dropdown h3 { margin: 0; font-size: 14px; }
+.notification-dropdown > p,
+.notification-dropdown > [role="alert"] { padding: 0 14px; font-size: 12px; }
+.notification-dropdown button:disabled { opacity: 0.6; cursor: default; }
+.notification-items { margin: 0; padding: 0; list-style: none; }
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  border-bottom: 1px solid #e8dad5;
+  background: #ffffff;
+  color: #53352b;
+  text-align: left;
+}
+.notification-item.unread { background: #fbf7f4; }
+.notification-item:hover { background: #f2e6dd; }
+.notification-item > span:not(.avatar):not(.notification-item-dot) { flex: 1; min-width: 0; }
+.notification-item strong,
+.notification-item > span > span,
+.notification-item small { display: block; overflow-wrap: anywhere; }
+.notification-item strong { font-size: 12px; }
+.notification-item > span > span { margin: 4px 0; font-size: 12px; }
+.notification-item small { color: #6f5a52; font-size: 10px; }
+.notification-item-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #e84291; margin-top: 5px; }
+@media (max-width: 780px) {
+  .notification-dropdown { position: fixed; top: 80px; left: 16px; right: 16px; width: auto; }
+}

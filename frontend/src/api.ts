@@ -54,6 +54,13 @@ export type ApiMember = { id: number; name: string; email: string; color: string
   eye_style: "plain" | "lashes"; gaze: "straight" | "left" | "right" | "up" | "happy" | "sleepy" };
 export type ApiStats = { room_count: number; completed_chores: number;
   workloads: { room_id: number; members: { user_id: number; unfinished_chores: number; workload_percent: number }[] }[] };
+export type ApiNotification = {
+  id: number; recipient_id: number; actor_id: number; actor: ApiMember;
+  kind: "chore_assigned" | "expense_added" | "repayment_reported" | "repayment_confirmed" | "room_joined";
+  message: string; room_id: number | null; chore_id: number | null; expense_id: number | null; settlement_id: number | null;
+  created_at: string; read_at: string | null;
+};
+export type ApiNotifications = { items: ApiNotification[]; unread_count: number; total: number };
 export type ApiRoom = { id: number; number: string; accent: string; member_ids: number[]; created_at: string; updated_at: string };
 export type InvitePreview = { number: string; accent: string };
 export type ChoreFilter = "all" | "mine" | "waiting" | "done";
@@ -105,6 +112,9 @@ export const api = {
   me: (signal?: AbortSignal) => request<ApiMember>("/me", { signal }),
   updateMe: (data: Partial<Pick<ApiMember, "name" | "color" | "eye_style" | "gaze">>, signal?: AbortSignal) => request<ApiMember>("/me", { method: "PATCH", body: JSON.stringify(data), signal }),
   stats: (signal?: AbortSignal) => request<ApiStats>("/me/stats", { signal }),
+  notifications: (signal?: AbortSignal) => request<ApiNotifications>("/notifications?limit=100", { signal }),
+  readNotification: (id: number, signal?: AbortSignal) => request<ApiNotification>(`/notifications/${id}/read`, { method: "POST", signal }),
+  readAllNotifications: (signal?: AbortSignal) => request<{ updated_count: number; unread_count: number }>("/notifications/read-all", { method: "POST", signal }),
   rooms: (signal?: AbortSignal) => request<ApiRoom[]>("/rooms", { signal }),
   members: (roomId: number, signal?: AbortSignal) => request<ApiMember[]>(`/rooms/${roomId}/members`, { signal }),
   invite: (roomId: number, signal?: AbortSignal) => request<{ code: string; path: string }>(`/rooms/${roomId}/invite`, { signal }),

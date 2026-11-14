@@ -292,6 +292,31 @@ test("profile updates use PATCH /me with name/color; stats are read from the API
   await assert.rejects(api.stats(), { status: 0 });
 });
 
+test("notifications list and read actions are authenticated, cancellable and body-free", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const message = { id: 8, kind: "chore_assigned", read_at: null };
+  setToken("notification-token");
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(url.includes("?limit") ? { items: [message], unread_count: 3, total: 3 }
+      : url.endsWith("read-all") ? { updated_count: 3, unread_count: 0 } : { ...message, read_at: "2026-11-14T12:00:00Z" });
+  };
+  assert.equal((await api.notifications(controller.signal)).unread_count, 3);
+  assert.ok((await api.readNotification(8, controller.signal)).read_at);
+  assert.equal((await api.readAllNotifications(controller.signal)).unread_count, 0);
+  assert.deepEqual(calls.map(({ url }) => url), ["/api/v1/notifications?limit=100", "/api/v1/notifications/8/read", "/api/v1/notifications/read-all"]);
+  for (const { options } of calls) {
+    assert.equal(options.signal, controller.signal);
+    assert.equal(options.headers.get("Authorization"), "Bearer notification-token");
+    assert.equal(options.body, undefined);
+  }
+  assert.equal(calls[1].options.method, "POST");
+  assert.equal(calls[2].options.method, "POST");
+  globalThis.fetch = async () => Response.json({}, { status: 404 });
+  await assert.rejects(api.readNotification(99), { status: 404 });
+});
+
 test("private 401 clears the session; login failures do not clear it", async () => {
   let expired = 0;
   const listener = () => expired++;

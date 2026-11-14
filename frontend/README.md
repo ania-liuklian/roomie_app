@@ -110,7 +110,7 @@ From `frontend`:
 ```powershell
 npx.cmd tsc --noEmit --noUnusedLocals --noUnusedParameters
 npm.cmd run build
-node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs
+node --test tests/api.test.mjs tests/money.test.mjs tests/avatar.test.mjs tests/choreForm.test.mjs tests/notifications.test.mjs
 ```
 
 From `backend`:
@@ -123,7 +123,7 @@ Backend tests use temporary SQLite files and test-only JWT secrets; they do not 
 
 ## Remaining inactive UI / limitations
 
-- The notification bell has no action. Shopping and expenses have no edit/delete controls, although the backend supports them. Chores now use their dots menu.
+- Shopping and expenses have no edit/delete controls, although the backend supports them. Chores use their dots menu; notifications use the bell dropdown.
 - Room accent and initials metadata remain unused by the fixed room design and character avatars.
 - Backend room edit/delete/leave/ownership transfer remain unimplemented. No polling or push updates: revisit a screen or reload to see another member's changes.
 
@@ -150,3 +150,20 @@ Browser checklist:
 3. Change them again and Save. Header/sidebar and other screens must show the saved avatar/name. Reload to verify persistence.
 4. Make another draft change and Cancel; it must restore the most recent successful save, not the initial login values.
 5. Stop the backend and Save. Verify the error, retained name/appearance draft, and enabled retry/Cancel after the request fails. Restart the backend, retry and verify success.
+
+
+## Notification bell
+
+The bell fetches the signed-in user's notification list on mount, every 30 seconds, when opened, and after successful read actions. It works independently of the selected room, including the empty-room onboarding state. The dot appears only when the API reports unread records. The dropdown shows actor avatars, generic messages, Kyiv-local timestamps and read/unread styling, using the existing palette and buttons. No expense notes are shown or logged.
+
+Click an unread item to mark it read; use the read-all button to mark every notification owned by the current user read, including records beyond the latest 100 displayed. The API's list and unread count are reloaded after a write. Read failures retain the previous state and show an error/retry control. Polls pause during read writes, and superseded fetches are canceled. Logout/user switching tears down the interval and pending requests. Outside click, the bell button or Escape closes the dropdown; Escape restores focus to the bell. Clicking a notification marks it read without navigating to its resource.
+
+Browser checks:
+
+1. Use a second room member to assign you a chore or include you in an expense. Wait up to 30 seconds: your bell should gain an unread dot. The actor should receive no self-notification.
+2. Open the dropdown and verify newest-first ordering, actor appearance, timestamps and unread styling. Click an unread item: its styling and unread count should update after the API response.
+3. Generate several notifications, then mark all read. The count/dot should clear. Refresh and verify persistence.
+4. Stop the backend and open/retry or mark a notification read. Verify loading/error states; restart and retry. An expired token should return to login.
+5. Log out and switch accounts: the previous list must not appear and no previous session's poll should continue.
+
+No backend schema change is needed for this frontend stage. If the notifications table has not been installed yet, follow the backend notifications migration instructions first.

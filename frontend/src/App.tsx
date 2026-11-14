@@ -4,6 +4,7 @@ import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday }
 import { money } from "./money";
 import Avatar, { avatarOptions, type AvatarOptions } from "./Avatar";
 import AvatarPicker from "./AvatarPicker";
+import NotificationBell from "./NotificationBell";
 import { dueForSave, localDateTime } from "./choreForm";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
@@ -928,6 +929,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   if (roomsLoading || roomsError || !rooms.length) return <>
     <SessionPanel><div className="form">
       <h3>Вітаємо, {currentUser.name}</h3>
+      <NotificationBell />
       {roomsLoading ? <p role="status">Завантаження кімнат…</p> : roomsError ? <><p role="alert">{roomsError}</p><button className="primary-button" onClick={() => setReload((value) => value + 1)}>Спробувати ще раз</button></> : <>
         <p>Створіть свою першу кімнату або приєднайтеся за запрошенням.</p>
         <button className="primary-button" onClick={() => { setActionError(""); setModal("room"); }}>Створити кімнату</button>
@@ -1014,9 +1016,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
           </div>
           <div className="top-actions">
             <button className="ghost-button" onClick={onLogout}><Icon name="logout" size={17} />Вийти</button>
-            <button className="circle-button notification">
-              <Icon name="bell" />
-            </button>
+            <NotificationBell />
             <button className="top-avatar" onClick={() => setPage("profile")}>
               <Avatar member={currentUser} size="md" />
             </button>
