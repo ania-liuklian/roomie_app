@@ -1,0 +1,20 @@
+name: roomie-postgres
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: roomie
+      POSTGRES_USER: roomie
+      POSTGRES_PASSWORD: roomie-local-only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roomie -d roomie"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:

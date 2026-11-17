@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, Integer, String, Text, UniqueConstraint, select
 
 from .database import Base, UTCDateTime, utcnow
 from .avatar import DEFAULT_COLOR, PALETTE
@@ -137,7 +137,7 @@ class ShoppingItem(Timestamps, Base):
     buyer_id = Column(ForeignKey("users.id"))
     created_by_id = Column(ForeignKey("users.id"), nullable=False)
     completed_at = Column(UTCDateTime)
-    __table_args__ = (CheckConstraint("(done = 0 AND buyer_id IS NULL AND completed_at IS NULL) OR (done = 1 AND buyer_id IS NOT NULL AND completed_at IS NOT NULL)"),)
+    __table_args__ = (CheckConstraint("(done = false AND buyer_id IS NULL AND completed_at IS NULL) OR (done = true AND buyer_id IS NOT NULL AND completed_at IS NOT NULL)"),)
 
 
 class Notification(Base):
@@ -156,3 +156,8 @@ class Notification(Base):
         CheckConstraint("recipient_id != actor_id"),
         CheckConstraint("kind IN ('chore_assigned','expense_added','repayment_reported','repayment_confirmed','room_joined')"),
     )
+
+
+def lock_room(db, room_id):
+    # PostgreSQL FOR NO KEY UPDATE serializes writers and permits FK key-share locks.
+    db.scalar(select(Room.id).where(Room.id == room_id).with_for_update(key_share=True))

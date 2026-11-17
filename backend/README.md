@@ -1,6 +1,6 @@
 # Roomie backend
 
-Implemented now: FastAPI, SQLAlchemy/SQLite, all domain tables, bcrypt registration/login, 30-minute JWT access tokens, `GET /me`, rooms, persistent random invite codes, membership, chores with recurrence/rotation, shopping, expenses, repayments, money summaries and Today. The frontend is connected to all these routes; only the auth token is stored in browser storage.
+Implemented now: FastAPI, SQLAlchemy with SQLite or PostgreSQL, all domain tables, bcrypt registration/login, 30-minute JWT access tokens, `GET /me`, rooms, persistent random invite codes, membership, chores with recurrence/rotation, shopping, expenses, repayments, money summaries and Today. The frontend is connected to all these routes; only the auth token is stored in browser storage.
 
 ## Run (PowerShell, from this backend directory)
 
@@ -41,13 +41,13 @@ Requires Node.js 22.12+ (Node 24 works). Open http://localhost:8443. Vite proxie
 
 Keep the generated JWT secret stable across restarts if existing tokens should remain valid; supply it through your deployment environment. No default secret is provided. Passwords must contain at least 8 characters and no more than 72 UTF-8 bytes, and are hashed with bcrypt (see [bcrypt's input limit](https://github.com/pyca/bcrypt)). Access tokens expire after 30 minutes; login again to obtain another. No refresh/logout endpoint yet. JWT decoding explicitly permits only HS256 and requires identity, issuance, expiry, issuer and audience claims; see [PyJWT usage](https://pyjwt.readthedocs.io/en/stable/usage.html).
 
-The database is created at startup, relative to the working directory. Foreign keys are enabled per connection. `create_all` is for the initial schema only; introduce migrations before evolving a database containing real data. UTC timestamps round-trip through SQLite with timezone information restored. There are no per-room timezone/currency fields: the initial product uses Europe/Kyiv display/calendar rules and UAH integer kopecks.
+SQLite creates missing tables at startup and enables foreign keys per connection. PostgreSQL requires `alembic upgrade head` before starting the app. See the [local PostgreSQL setup](../README.md#local-postgresql-16). UTC timestamps round-trip through SQLite with timezone information restored. There are no per-room timezone/currency fields: the initial product uses Europe/Kyiv display/calendar rules and UAH integer kopecks.
 
 ```powershell
 .\.venv\Scripts\python -m pytest
 ```
 
-Tests use temporary SQLite files and an explicit test secret; no real data or seed accounts are installed.
+Tests use temporary SQLite files by default. Set `ROOMIE_TEST_POSTGRES_URL` to run the API and model suites in isolated PostgreSQL schemas, as described in the [root README](../README.md#verification).
 
 Frontend checks, from `frontend` (see its README for browser checks):
 

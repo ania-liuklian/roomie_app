@@ -13,8 +13,8 @@ GOOGLE_LINK = "/api/v1/auth/google/link"
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    app = create_app(f"sqlite:///{(tmp_path / 'google.db').as_posix()}", SECRET)
+def client(database_url, monkeypatch):
+    app = create_app(database_url, SECRET)
     monkeypatch.setattr("app.main.verify_google_credential", lambda _: {
         "sub": "google-stable-id-123", "email": "test@example.com",
         "name": "Test Google", "email_verified": True,
@@ -104,3 +104,21 @@ def test_google_not_configured_and_unverified_is_rejected(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         verify_google_credential("unverified")
     assert exc.value.status_code == 401
+
+
+
+def test_google_key_transport_failure_is_service_unavailable(monkeypatch):
+    from fastapi import HTTPException
+    from google.auth.exceptions import TransportError
+
+    from app.google_auth import verify_google_credential
+
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com")
+
+    def unavailable(*args):
+        raise TransportError("test connection failure")
+
+    monkeypatch.setattr("app.google_auth.id_token.verify_oauth2_token", unavailable)
+    with pytest.raises(HTTPException) as exc:
+        verify_google_credential("test-credential")
+    assert exc.value.status_code == 503

@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars after approval. Choose a minor version offered in Frankfurt.
+google_client_id          = "REPLACE.apps.googleusercontent.com"
+aurora_engine_version     = "REPLACE"
+final_snapshot_identifier = "roomie-final-unique"

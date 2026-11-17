@@ -9,29 +9,35 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import case, func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .database import Base, make_engine, utcnow
-from .models import Chore, GoogleIdentity, Room, RoomInvite, RoomMember, User
+from .database import Base, begin_snapshot, begin_write, make_engine, utcnow
+from .models import Chore, GoogleIdentity, Room, RoomInvite, RoomMember, User, lock_room
 from .schemas import Credentials, GoogleCredential, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
 from .notifications import install_notifications, notify
 from .google_auth import verify_google_credential
 
 
-def create_app(database_url=None, jwt_secret=None):
+def create_app(database_url=None, jwt_secret=None, *, create_schema=None, connect_token=None):
     secret = jwt_secret or os.getenv("JWT_SECRET", "")
     if len(secret.encode()) < 32:
         raise RuntimeError("Set JWT_SECRET to a random secret of at least 32 bytes")
-    engine = make_engine(database_url or os.getenv("DATABASE_URL", "sqlite:///./roomie.db"))
+    engine = make_engine(database_url or os.getenv("DATABASE_URL", "sqlite:///./roomie.db"),
+                         connect_token=connect_token)
+    if create_schema is None:
+        create_schema = engine.dialect.name == "sqlite"
     sessions = sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
     async def lifespan(app):
-        Base.metadata.create_all(engine)
-        yield
-        engine.dispose()
+        if create_schema:
+            Base.metadata.create_all(engine)
+        try:
+            yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(title="Roomie API", lifespan=lifespan)
     app.state.engine = engine
@@ -44,6 +50,18 @@ def create_app(database_url=None, jwt_secret=None):
             {"loc": list(error["loc"]), "type": error["type"], "msg": error["msg"]}
             for error in exc.errors()
         ]})
+
+    @app.exception_handler(OperationalError)
+    async def database_unavailable(request, exc):
+        # A socket failure can also happen after COMMIT was sent. Never replay writes here.
+        if engine.dialect.name == "postgresql":
+            state = getattr(exc.orig, "sqlstate", None) or ""
+            if not state or state.startswith("08") or state in {"57P01", "57P02", "57P03", "55P03", "57014"}:
+                return JSONResponse(
+                    status_code=503, content={"detail": "Database temporarily unavailable"},
+                    headers={"Retry-After": "5"} if request.method in {"GET", "HEAD"} else None,
+                )
+        raise exc
 
     def db_session():
         with sessions() as session:
@@ -183,7 +201,7 @@ def create_app(database_url=None, jwt_secret=None):
     @app.get("/api/v1/me/stats")
     def my_stats(user: User = Depends(current_user)):
         with sessions() as db:
-            db.execute(text("BEGIN"))
+            begin_snapshot(db)
             room_ids = list(db.scalars(select(RoomMember.room_id).where(RoomMember.user_id == user.id)))
             counts = db.execute(select(Chore.room_id, Chore.owner_id,
                 func.sum(case((Chore.status == "done", 1), else_=0)),
@@ -246,11 +264,13 @@ def create_app(database_url=None, jwt_secret=None):
         user_id = user.id
         # Authenticate first, then serialize membership and notification creation.
         db.rollback()
-        db.execute(text("BEGIN IMMEDIATE"))
+        begin_write(db)
         invite = db.scalar(select(RoomInvite).where(RoomInvite.code == code))
         if invite is None:
             raise HTTPException(404, "Invite not found")
         room_id = invite.room_id
+        if db.bind.dialect.name == "postgresql":
+            lock_room(db, room_id)
         if db.get(RoomMember, (room_id, user_id)) is None:
             recipients = list(db.scalars(select(RoomMember.user_id).where(RoomMember.room_id == room_id)))
             db.add(RoomMember(room_id=room_id, user_id=user_id))

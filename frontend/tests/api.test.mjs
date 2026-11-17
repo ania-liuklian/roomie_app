@@ -391,6 +391,16 @@ test("network failures are retryable, aborts remain distinguishable", async () =
   await assert.rejects(api.rooms(controller.signal), { name: "AbortError" });
 });
 
+test("an uncertain write tells the user to check the result and sends the request once", async () => {
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    return Response.json({}, { status: 503, headers: { "Retry-After": "5" } });
+  };
+  await assert.rejects(api.addShopping(7, "Tea"), { status: 503, message: /перевірте результат/ });
+  assert.equal(attempts, 1);
+});
+
 test("invite links preserve codes, work locally and reject invalid input", () => {
   assert.equal(inviteCode("http://localhost:8443/invite/a_b-123"), "a_b-123");
   assert.equal(inviteCode("a_b-123"), "a_b-123");

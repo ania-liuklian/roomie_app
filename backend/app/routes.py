@@ -1,16 +1,16 @@
-"""Room-scoped domain endpoints. All mutations acquire SQLite's write lock first."""
+"""Room-scoped domain endpoints. Room writes serialize before reading mutable state."""
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .balances import compute_balances, split_equal, validate_settlement
-from .database import utcnow
+from .database import begin_snapshot, begin_write, utcnow
 from .domain_schemas import ChoreCreate, ChoreEdit, ExpenseCreate, ExpenseEdit, SettlementCreate, ShoppingCreate, ShoppingEdit
-from .models import Chore, ChoreRotationMember, Expense, ExpenseShare, Room, RoomMember, Settlement, ShoppingItem, User
+from .models import Chore, ChoreRotationMember, Expense, ExpenseShare, Room, RoomMember, Settlement, ShoppingItem, User, lock_room
 from .schemas import UserOut
 from .notifications import notify
 
@@ -129,15 +129,16 @@ def install_routes(app, sessions, current_user):
 
     def read_db():
         with sessions() as db:
-            # Keep summary queries on one consistent SQLite snapshot.
-            db.execute(text("BEGIN"))
+            begin_snapshot(db)
             yield db
 
-    def write_db():
+    def write_db(room_id: int):
         # Independent of the auth read session. Lock before membership/state reads.
         with sessions() as db:
-            db.execute(text("BEGIN IMMEDIATE"))
+            begin_write(db)
             try:
+                if db.bind.dialect.name == "postgresql":
+                    lock_room(db, room_id)
                 yield db
                 db.commit()
             except Exception:

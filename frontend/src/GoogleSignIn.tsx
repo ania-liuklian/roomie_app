@@ -15,7 +15,7 @@ let scriptPromise: Promise<void> | undefined;
 function loadGoogleScript(): Promise<void> {
   if (window.google?.accounts.id) return Promise.resolve();
   if (!scriptPromise) {
-    scriptPromise = new Promise((resolve, reject) => {
+    scriptPromise = new Promise<void>((resolve, reject) => {
       const script = document.createElement("script");
       script.src = "https://accounts.google.com/gsi/client";
       script.async = true;

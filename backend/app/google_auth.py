@@ -1,5 +1,6 @@
 """Verification of Google Identity Services ID tokens (not Google access tokens)."""
 import os
+from functools import partial
 
 from fastapi import HTTPException
 from google.auth import exceptions as google_exceptions
@@ -12,7 +13,10 @@ def verify_google_credential(credential: str) -> dict:
     if not client_id:
         raise HTTPException(503, "Google sign-in is not configured")
     try:
-        claims = id_token.verify_oauth2_token(credential, google_requests.Request(), client_id)
+        request = partial(google_requests.Request(), timeout=5)
+        claims = id_token.verify_oauth2_token(credential, request, client_id)
+    except google_exceptions.TransportError:
+        raise HTTPException(503, "Google signing keys temporarily unavailable") from None
     except (ValueError, google_exceptions.GoogleAuthError):
         raise HTTPException(401, "Invalid Google credentials") from None
     # Reject unverified email addresses and missing immutable Google identity IDs.

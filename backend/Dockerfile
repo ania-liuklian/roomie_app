@@ -4,12 +4,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 WORKDIR /srv
 
-COPY requirements.txt .
+COPY requirements.txt requirements-runtime.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --system --create-home roomie \
     && mkdir /data \
     && chown roomie:roomie /data
 COPY app ./app
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 USER roomie
 EXPOSE 8000
