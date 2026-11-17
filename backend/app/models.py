@@ -25,6 +25,13 @@ class User(Timestamps, Base):
     )
 
 
+class GoogleIdentity(Base):
+    """Google's stable `sub` is the identity key; email can change."""
+    __tablename__ = "google_identities"
+    google_sub = Column(String(255), primary_key=True)
+    user_id = Column(ForeignKey("users.id"), nullable=False, unique=True)
+
+
 class Room(Timestamps, Base):
     __tablename__ = "rooms"
     id = Column(Integer, primary_key=True)

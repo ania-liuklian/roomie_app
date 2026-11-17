@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { GoogleSignIn } from "./GoogleSignIn";
 import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday } from "./api";
 import { money } from "./money";
@@ -8,7 +9,7 @@ import NotificationBell from "./NotificationBell";
 import { dueForSave, localDateTime } from "./choreForm";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
-type ModalName = "invite" | "join" | "room" | "chore" | "chore-edit" | "chore-delete" | "expense" | "shopping" | null;
+type ModalName = "invite" | "join" | "room" | "chore" | "chore-edit" | "chore-delete" | "expense" | "shopping" | "shopping-delete" | null;
 type Member = AvatarOptions & {
   id: number;
   name: string;
@@ -284,10 +285,25 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => v
       <label>Електронна пошта<input name="email" type="email" autoComplete="email" required disabled={busy} /></label>
       <label>Пароль<input name="password" type="password" minLength={8} required autoComplete={register ? "new-password" : "current-password"} disabled={busy} /></label>
       {error && <p role="alert">{error}</p>}
-      <button className="primary-button" disabled={busy}>{busy ? "Зачекайте…" : register ? "Зареєструватися" : "Увійти"}</button>
+      <button className="primary-button" style={{ justifySelf: "center" }} disabled={busy}>{busy ? "Зачекайте…" : register ? "Зареєструватися" : "Увійти"}</button>
       <button className="ghost-button" type="button" disabled={busy} onClick={() => { setRegister(!register); setError(""); }}>
         {register ? "Вже є акаунт? Увійти" : "Немає акаунта? Зареєструватися"}
       </button>
+      {import.meta.env.VITE_GOOGLE_CLIENT_ID && <>
+      <p style={{ textAlign: "center", margin: "4px 0", color: "var(--muted)" }}>або</p>
+      <GoogleSignIn disabled={busy} onCredential={async (credential) => {
+        setBusy(true);
+        setError("");
+        try {
+          const result = await api.googleLogin(credential);
+          onAuthenticated(result.access_token);
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "Не вдалося увійти через Google.");
+        } finally {
+          setBusy(false);
+        }
+      }} />
+      </>}
     </form>
   </SessionPanel>;
 }
@@ -347,6 +363,8 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   const [statsReload, setStatsReload] = useState(0);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [googleLinked, setGoogleLinked] = useState<boolean | null>(null);
+  const [googleStatusError, setGoogleStatusError] = useState("");
   const profileRequest = useRef<AbortController | null>(null);
   const [filteredChores, setFilteredChores] = useState<Chore[]>([]);
   const [choreMenu, setChoreMenu] = useState<number | null>(null);
@@ -377,6 +395,8 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   const [shoppingReload, setShoppingReload] = useState(0);
   const [shoppingSaving, setShoppingSaving] = useState(false);
   const [shoppingFormError, setShoppingFormError] = useState("");
+  const [shoppingDeleteTarget, setShoppingDeleteTarget] = useState<ShoppingItem | null>(null);
+  const [shoppingDeleteError, setShoppingDeleteError] = useState("");
   const shoppingRequest = useRef<{ roomId: number; controller: AbortController } | null>(null);
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [roomsError, setRoomsError] = useState("");
@@ -423,6 +443,19 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setProfileSaving(false);
     setProfileError("");
     return () => { controller.abort(); profileRequest.current = null; };
+  }, [page]);
+
+  useEffect(() => {
+    if (page !== "profile" || !import.meta.env.VITE_GOOGLE_CLIENT_ID) return;
+    const controller = new AbortController();
+    setGoogleLinked(null);
+    setGoogleStatusError("");
+    api.googleLinkStatus(controller.signal).then(({ linked }) => {
+      if (!controller.signal.aborted) setGoogleLinked(linked);
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted && error.name !== "AbortError") setGoogleStatusError(error.message);
+    });
+    return () => controller.abort();
   }, [page]);
 
   useEffect(() => {
@@ -498,7 +531,9 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setShoppingSaving(false);
     setShoppingError("");
     setShoppingFormError("");
-    setModal((value) => value === "shopping" ? null : value);
+    setShoppingDeleteTarget(null);
+    setShoppingDeleteError("");
+    setModal((value) => value === "shopping" || value === "shopping-delete" ? null : value);
     api.shopping(roomId, controller.signal).then((items) => {
       if (!controller.signal.aborted) {
         setShopping(items.map(toShoppingItem));
@@ -859,13 +894,31 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     } finally { if (!context.controller.signal.aborted) setShoppingSaving(false); }
   };
 
+  const deleteShopping = async () => {
+    const item = shoppingDeleteTarget;
+    const context = shoppingRequest.current;
+    if (!item || !context || context.roomId !== item.roomId || context.controller.signal.aborted || shoppingSaving) return;
+    setShoppingSaving(true);
+    setShoppingDeleteError("");
+    try {
+      await api.deleteShopping(item.roomId, item.id, context.controller.signal);
+      if (context.controller.signal.aborted) return;
+      setShopping((items) => items.filter((row) => row.id !== item.id));
+      setShoppingDeleteTarget(null);
+      setModal(null);
+      notify("Покупку видалено");
+    } catch (error) {
+      if (!context.controller.signal.aborted) setShoppingDeleteError(error instanceof Error ? error.message : "Не вдалося видалити покупку.");
+    } finally { if (!context.controller.signal.aborted) setShoppingSaving(false); }
+  };
+
   const titles: Record<Page, { title: string; subtitle: string }> = {
-    today: { title: "ROOMIE", subtitle: "" },
+    today: { title: "", subtitle: "" },
     chores: { title: "Обов’язки", subtitle: "" },
     shopping: { title: "Список покупок", subtitle: "" },
     money: { title: "Спільні гроші", subtitle: "" },
-    room: { title: `Кімната ${room.number}`, subtitle: "Мешканці, запрошення та налаштування" },
-    profile: { title: "Мій профіль", subtitle: "Керуйте своїми даними в Roomie" },
+    room: { title: `Кімната ${room.number}`, subtitle: "" },
+    profile: { title: "Мій профіль", subtitle: "" },
   };
 
   const closeRoomDialog = () => {
@@ -949,7 +1002,6 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
         <div className="room-picker">
           <label>Поточна кімната</label>
           <div className="select-wrap">
-            <span className="room-number">{room.number}</span>
             <select value={roomId} onChange={(event) => setRoomId(Number(event.target.value))}>
               {rooms.map((item) => (
                 <option value={item.id} key={item.id}>
@@ -1011,7 +1063,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>{titles[page].title}</h1>
+            {titles[page].title && <h1>{titles[page].title}</h1>}
             {titles[page].subtitle && <p>{titles[page].subtitle}</p>}
           </div>
           <div className="top-actions">
@@ -1254,17 +1306,19 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
               {shoppingRoomId === roomId && !shoppingLoading && !shoppingError && !roomShopping.length && <p>Список покупок порожній.</p>}
               {shoppingSaving && <p role="status">Збереження…</p>}
               {shoppingRoomId === roomId && !shoppingLoading && roomShopping.map((item) => (
-                <label className={item.done ? "bought" : ""} key={item.id}>
-                  <input
-                    type="checkbox"
-                    checked={item.done}
-                    disabled={shoppingSaving}
-                    onChange={() => toggleShopping(item)}
-                  />
-                  <span className="shopping-check">
-                    <Icon name="check" size={15} />
-                  </span>
-                  <strong>{item.title}</strong>
+                <div className={`shopping-item ${item.done ? "bought" : ""}`} key={item.id}>
+                  <label className="shopping-item-toggle">
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      disabled={shoppingSaving}
+                      onChange={() => toggleShopping(item)}
+                    />
+                    <span className="shopping-check">
+                      <Icon name="check" size={15} />
+                    </span>
+                    <strong>{item.title}</strong>
+                  </label>
                   {item.buyerId ? (
                     <span className="buyer">
                       <Avatar member={members.find((person) => person.id === item.buyerId) || { id: item.buyerId, name: "Мешканець", initials: "", color: "#7063df", email: "" }} size="xs" />
@@ -1273,7 +1327,17 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   ) : (
                     <span className="need">Потрібно купити</span>
                   )}
-                </label>
+                  <button
+                    type="button"
+                    className="shopping-remove"
+                    aria-label={`Видалити покупку «${item.title}»`}
+                    title="Видалити покупку"
+                    disabled={shoppingSaving}
+                    onClick={() => { setShoppingDeleteTarget(item); setShoppingDeleteError(""); setModal("shopping-delete"); }}
+                  >
+                    <Icon name="close" size={17} />
+                  </button>
+                </div>
               ))}
             </section>
           </div>
@@ -1481,7 +1545,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   />
                 </label>
                 <AvatarPicker value={profileAvatar} onChange={setProfileAvatar} disabled={profileSaving} />
-                <div>
+                <div className="profile-actions">
                   <button
                     type="button"
                     className="outline-button"
@@ -1493,6 +1557,23 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   <button className="primary-button" disabled={profileSaving}>{profileSaving ? "Збереження…" : "Зберегти зміни"}</button>
                 </div>
                 {profileError && <p role="alert">{profileError}</p>}
+                {import.meta.env.VITE_GOOGLE_CLIENT_ID && <section className="google-link-section">
+                  {googleLinked === true ? <p>Google-акаунт уже прив’язано.</p>
+                    : googleStatusError ? <p role="alert">Не вдалося перевірити прив’язування: {googleStatusError}</p>
+                    : googleLinked === null ? <p role="status">Перевірка прив’язування Google…</p>
+                    : <>
+                      <p>Прив’язати Google-акаунт для входу без пароля:</p>
+                      <GoogleSignIn onCredential={async (credential) => {
+                        try {
+                          await api.linkGoogle(credential);
+                          setGoogleLinked(true);
+                          notify("Google-акаунт прив’язано");
+                        } catch (error) {
+                          setProfileError(error instanceof Error ? error.message : "Не вдалося прив’язати Google.");
+                        }
+                      }} />
+                    </>}
+                </section>}
               </form>
               <div className="profile-metrics">
                 <div>
@@ -1527,7 +1608,6 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   }}
                   key={item.id}
                 >
-                  <span className="large-room-number">{item.number}</span>
                   <span>
                     <strong>Кімната {item.number}</strong>
                     <small>{item.memberIds.length} мешканці</small>
@@ -1536,6 +1616,26 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   <Icon name="chevron" size={17} />
                 </button>
               ))}
+            </section>
+            <section className="profile-donation" aria-labelledby="profile-donation-title">
+              <div className="profile-donation-copy">
+                <span className="profile-donation-label">ДОБРА СПРАВА РАЗОМ</span>
+                <h3 id="profile-donation-title">Подобається Roomie? Підтримайте добру справу</h3>
+                <p>
+                  Якщо вам подобається наш застосунок, підтримайте нашу команду донатом.
+                  Усі зібрані кошти буде спрямовано на збір УКУ «Під одним крилом».
+                </p>
+              </div>
+              <a
+                className="profile-donation-link"
+                href="https://send.monobank.ua/jar/e4aq8ngAd"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Підтримати збір УКУ «Під одним крилом» на monobank (відкриється в новій вкладці)"
+              >
+                Підтримати збір
+                <Icon name="arrow" size={18} />
+              </a>
             </section>
           </div>
         )}
@@ -1768,6 +1868,25 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
               <button className="primary-button" disabled={shoppingSaving}>{shoppingSaving ? "Додавання…" : "Додати до списку"}</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {page === "shopping" && modal === "shopping-delete" && shoppingDeleteTarget && (
+        <Modal
+          title="Видалити покупку?"
+          note={`«${shoppingDeleteTarget.title}» буде остаточно видалено зі спільного списку.`}
+          onClose={() => { if (!shoppingSaving) { setModal(null); setShoppingDeleteTarget(null); } }}
+        >
+          <div className="form">
+            <p>Після видалення відновити покупку не вдасться.</p>
+            {shoppingDeleteError && <p role="alert">{shoppingDeleteError}</p>}
+            <div className="modal-actions">
+              <button type="button" className="outline-button" disabled={shoppingSaving} onClick={() => { setModal(null); setShoppingDeleteTarget(null); }}>Скасувати</button>
+              <button type="button" className="primary-button" disabled={shoppingSaving} onClick={deleteShopping}>
+                {shoppingSaving ? "Видалення…" : "Так, видалити"}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 

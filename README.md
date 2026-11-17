@@ -93,3 +93,11 @@ npm.cmd run build
 The frontend build is written to `frontend/dist`. Production hosting needs HTTPS, a stable JWT secret, persistent database storage, and an API reverse proxy or appropriate CORS configuration; the Vite dev proxy is development-only.
 
 For endpoint details and browser checklists, see the [backend README](backend/README.md) and [frontend README](frontend/README.md).
+
+## Google Sign-In
+
+In addition to existing email/password registration, Roomie supports **Sign in with Google** using Google Identity Services. The FastAPI backend validates the Google ID token and returns the same Roomie JWT as the password login flow. You need a Google Cloud **OAuth 2.0 Web client ID**. Configure `GOOGLE_CLIENT_ID` for the backend and `VITE_GOOGLE_CLIENT_ID` for the frontend; see [Google + AWS setup](infra/README.md#1-google-cloud-configuration). A current password user can explicitly link the matching Google account from the profile without losing existing data.
+
+## Deploy on AWS over HTTPS
+
+The top-level [`infra/`](infra/) directory contains a single-host Docker Compose setup for **AWS EC2**: FastAPI backend, statically built React frontend served through Caddy, persistent SQLite Docker volume, and automatic HTTPS when a DNS domain points to your EC2 instance. It requires real AWS configuration, a domain/subdomain, and Google OAuth credentials. See the **[deployment guide](infra/README.md)** for the detailed launch, configuration, security, backup, and post-deployment verification steps. Deployment is not automatic merely from adding these files.
