@@ -1,4 +1,4 @@
-# Runtime secrets and local database files, wherever they are created.
+# Runtime secrets and local database files
 .env*
 !.env.example
 *.db
@@ -7,3 +7,34 @@
 *.sqlite-*
 *.sqlite3
 *.sqlite3-*
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfvars.json
+*.tfplan
+
+# Generated artifacts
+/infra/build/
+frontend/dist/
+backend/.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node.js
+node_modules/
+
+# macOS
+.DS_Store

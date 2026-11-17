@@ -9,28 +9,35 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import case, func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .database import Base, make_engine, utcnow
-from .models import Chore, Room, RoomInvite, RoomMember, User
-from .schemas import Credentials, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
+from .database import Base, begin_snapshot, begin_write, make_engine, utcnow
+from .models import Chore, GoogleIdentity, Room, RoomInvite, RoomMember, User, lock_room
+from .schemas import Credentials, GoogleCredential, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
 from .notifications import install_notifications, notify
+from .google_auth import verify_google_credential
 
 
-def create_app(database_url=None, jwt_secret=None):
+def create_app(database_url=None, jwt_secret=None, *, create_schema=None, connect_token=None):
     secret = jwt_secret or os.getenv("JWT_SECRET", "")
     if len(secret.encode()) < 32:
         raise RuntimeError("Set JWT_SECRET to a random secret of at least 32 bytes")
-    engine = make_engine(database_url or os.getenv("DATABASE_URL", "sqlite:///./roomie.db"))
+    engine = make_engine(database_url or os.getenv("DATABASE_URL", "sqlite:///./roomie.db"),
+                         connect_token=connect_token)
+    if create_schema is None:
+        create_schema = engine.dialect.name == "sqlite"
     sessions = sessionmaker(engine, expire_on_commit=False)
 
     @asynccontextmanager
     async def lifespan(app):
-        Base.metadata.create_all(engine)
-        yield
-        engine.dispose()
+        if create_schema:
+            Base.metadata.create_all(engine)
+        try:
+            yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(title="Roomie API", lifespan=lifespan)
     app.state.engine = engine
@@ -43,6 +50,18 @@ def create_app(database_url=None, jwt_secret=None):
             {"loc": list(error["loc"]), "type": error["type"], "msg": error["msg"]}
             for error in exc.errors()
         ]})
+
+    @app.exception_handler(OperationalError)
+    async def database_unavailable(request, exc):
+        # A socket failure can also happen after COMMIT was sent. Never replay writes here.
+        if engine.dialect.name == "postgresql":
+            state = getattr(exc.orig, "sqlstate", None) or ""
+            if not state or state.startswith("08") or state in {"57P01", "57P02", "57P03", "55P03", "57014"}:
+                return JSONResponse(
+                    status_code=503, content={"detail": "Database temporarily unavailable"},
+                    headers={"Retry-After": "5"} if request.method in {"GET", "HEAD"} else None,
+                )
+        raise exc
 
     def db_session():
         with sessions() as session:
@@ -106,9 +125,71 @@ def create_app(database_url=None, jwt_secret=None):
             raise unauthorized()
         return token(user)
 
+    @app.post("/api/v1/auth/google", response_model=TokenOut)
+    def login_with_google(data: GoogleCredential, db: Session = Depends(db_session)):
+        claims = verify_google_credential(data.credential)
+        google_sub = str(claims["sub"])
+        email = str(claims["email"]).strip().lower()
+        if not email or len(email) > 254 or len(google_sub) > 255:
+            raise unauthorized()
+        identity = db.get(GoogleIdentity, google_sub)
+        if identity is not None:
+            user = db.get(User, identity.user_id)
+            if user is None:
+                raise unauthorized()
+            return token(user)
+        # Never silently merge accounts based on an email address. Require the
+        # current password session to explicitly link a pre-existing account.
+        if db.scalar(select(User).where(User.email == email)) is not None:
+            raise HTTPException(409, "Account exists. Sign in with password and link Google in your profile")
+        name = str(claims.get("name") or email.split("@")[0]).strip()[:100]
+        user = User(email=email, name=name or "Google user",
+                    password_hash=bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt()).decode())
+        try:
+            db.add(user)
+            db.flush()
+            db.add(GoogleIdentity(google_sub=google_sub, user_id=user.id))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Account registration conflict; retry sign-in") from None
+        return token(user)
+
+    @app.post("/api/v1/auth/google/link")
+    def link_google(data: GoogleCredential, user: User = Depends(current_user), db: Session = Depends(db_session)):
+        claims = verify_google_credential(data.credential)
+        google_sub = str(claims["sub"])
+        email = str(claims["email"]).strip().lower()
+        if email != user.email or len(google_sub) > 255:
+            raise HTTPException(409, "Google email must match your Roomie account email")
+        existing = db.get(GoogleIdentity, google_sub)
+        if existing:
+            if existing.user_id != user.id:
+                raise HTTPException(409, "Google account already linked to another user")
+            return {"linked": True}
+        linked = db.scalar(select(GoogleIdentity).where(GoogleIdentity.user_id == user.id))
+        if linked is not None:
+            raise HTTPException(409, "A different Google account is already linked")
+        db.add(GoogleIdentity(google_sub=google_sub, user_id=user.id))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Google account linking conflict") from None
+        return {"linked": True}
+
+    @app.get("/api/v1/healthz")
+    def health():
+        return {"status": "ok"}
+
     @app.get("/api/v1/me", response_model=UserOut)
     def me(user: User = Depends(current_user)):
         return user
+
+    @app.get("/api/v1/me/google")
+    def google_link_status(user: User = Depends(current_user), db: Session = Depends(db_session)):
+        linked = db.scalar(select(GoogleIdentity.google_sub).where(GoogleIdentity.user_id == user.id)) is not None
+        return {"linked": linked}
 
     @app.patch("/api/v1/me", response_model=UserOut)
     def update_me(data: ProfileEdit, user: User = Depends(current_user), db: Session = Depends(db_session)):
@@ -120,7 +201,7 @@ def create_app(database_url=None, jwt_secret=None):
     @app.get("/api/v1/me/stats")
     def my_stats(user: User = Depends(current_user)):
         with sessions() as db:
-            db.execute(text("BEGIN"))
+            begin_snapshot(db)
             room_ids = list(db.scalars(select(RoomMember.room_id).where(RoomMember.user_id == user.id)))
             counts = db.execute(select(Chore.room_id, Chore.owner_id,
                 func.sum(case((Chore.status == "done", 1), else_=0)),
@@ -183,11 +264,13 @@ def create_app(database_url=None, jwt_secret=None):
         user_id = user.id
         # Authenticate first, then serialize membership and notification creation.
         db.rollback()
-        db.execute(text("BEGIN IMMEDIATE"))
+        begin_write(db)
         invite = db.scalar(select(RoomInvite).where(RoomInvite.code == code))
         if invite is None:
             raise HTTPException(404, "Invite not found")
         room_id = invite.room_id
+        if db.bind.dialect.name == "postgresql":
+            lock_room(db, room_id)
         if db.get(RoomMember, (room_id, user_id)) is None:
             recipients = list(db.scalars(select(RoomMember.user_id).where(RoomMember.room_id == room_id)))
             db.add(RoomMember(room_id=room_id, user_id=user_id))

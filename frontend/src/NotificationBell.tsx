@@ -46,11 +46,32 @@ export default function NotificationBell() {
 
   useEffect(() => {
     alive.current = true;
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 30_000);
+    const idleAfter = 120_000;
+    let lastActivity = Date.now();
+    const refreshAfterIdle = (event: Event) => {
+      if (document.hidden) return;
+      const wasIdle = Date.now() - lastActivity >= idleAfter;
+      lastActivity = Date.now();
+      if (wasIdle && !(event.target instanceof Node && bell.current?.contains(event.target))) void refresh();
+    };
+    const refreshOnReturn = () => {
+      if (document.hidden) return;
+      lastActivity = Date.now();
+      void refresh();
+    };
+    refreshOnReturn();
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    document.addEventListener("pointerdown", refreshAfterIdle);
+    document.addEventListener("keydown", refreshAfterIdle);
+    const timer = window.setInterval(() => {
+      if (!document.hidden && Date.now() - lastActivity < idleAfter) void refresh();
+    }, 30_000);
     return () => {
       alive.current = false;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+      document.removeEventListener("pointerdown", refreshAfterIdle);
+      document.removeEventListener("keydown", refreshAfterIdle);
       reading.current?.abort();
       writing.current?.abort();
       writing.current = null;

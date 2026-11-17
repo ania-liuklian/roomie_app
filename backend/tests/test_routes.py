@@ -14,8 +14,8 @@ DUE = "2026-11-14T18:00:00+02:00"
 
 
 @pytest.fixture
-def api(tmp_path):
-    app = create_app(f"sqlite:///{(tmp_path / 'routes.db').as_posix()}", SECRET)
+def api(database_url):
+    app = create_app(database_url, SECRET)
     with TestClient(app) as client:
         with app.state.sessions() as db:
             db.add_all([User(id=i, email=f"member{i}@example.com", name=f"Member {i}", password_hash="unused") for i in range(1, 6)])

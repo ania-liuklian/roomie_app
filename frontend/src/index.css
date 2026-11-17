@@ -4555,3 +4555,207 @@ body {
 @media (max-width: 780px) {
   .notification-dropdown { position: fixed; top: 80px; left: 16px; right: 16px; width: auto; }
 }
+
+
+/* Profile layout: allow the picker and form actions to wrap without clipping. */
+.profile-layout {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+.profile-main, .profile-form, .avatar-picker, .avatar-picker-options {
+  min-width: 0;
+}
+.profile-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+.profile-form > .profile-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 9px;
+}
+.profile-form > .profile-actions button {
+  min-width: 0;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.profile-form > .google-link-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  margin-top: 20px;
+  border-top: 1px solid #e3d6d8;
+  padding-top: 16px;
+}
+.google-link-section p {
+  margin: 0;
+  color: #53352b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.google-link-section > div {
+  justify-self: center;
+  max-width: 100%;
+}
+@media (max-width: 1200px) {
+  .profile-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Empty states need internal spacing rather than inheriting reset paragraph margins. */
+.task-board > p,
+.shopping-board > p,
+.debt-surface > p,
+.history > p {
+  margin: 0;
+  padding: 20px 24px;
+  color: #6f5a52;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+
+/* Shopping rows: the checkbox label and delete button are separate controls. */
+.shopping-board .shopping-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 70px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e4dcde;
+}
+.shopping-board .shopping-item:last-child { border-bottom: 0; }
+.shopping-board .shopping-item-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.shopping-board .shopping-item-toggle > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  color: #53352b;
+}
+.shopping-board .shopping-item-toggle input {
+  display: block;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.shopping-board .shopping-item-toggle:has(input:focus-visible) .shopping-check {
+  outline: 2px solid #53352b;
+  outline-offset: 3px;
+}
+.shopping-board .shopping-check { flex: none; }
+.shopping-board .shopping-item.bought .shopping-item-toggle > strong { text-decoration: line-through; }
+.shopping-board .shopping-item.bought .shopping-item-toggle,
+.shopping-board .shopping-item.bought .buyer { opacity: 0.65; }
+.shopping-board .shopping-item .buyer,
+.shopping-board .shopping-item .need { flex: 0 1 auto; }
+.shopping-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: #806e78;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.shopping-remove:hover { color: #8f3350; background: #f9e9ee; }
+.shopping-remove:focus-visible { outline: 2px solid #53352b; outline-offset: 2px; }
+.shopping-remove:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* The room name is already displayed; its duplicate avatar is unnecessary. */
+.my-rooms > button:not(.join-another) {
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+}
+@media (max-width: 780px) {
+  .shopping-board .shopping-item { flex-wrap: wrap; }
+  .shopping-board .shopping-item-toggle { flex: 1 1 calc(100% - 49px); }
+  .shopping-board .shopping-remove { order: 1; }
+  .shopping-board .shopping-item .buyer,
+  .shopping-board .shopping-item .need { order: 2; margin-left: 38px; }
+  .my-rooms > button:not(.join-another) {
+    grid-template-columns: minmax(0, 1fr) 18px;
+  }
+}
+
+/* Fundraising banner below both profile columns. */
+.profile-donation {
+  grid-column: 1 / -1;
+  width: min(100%, 880px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 24px 28px;
+  border: 1px solid #e4d5df;
+  border-radius: 20px;
+  background: #f7eff7;
+}
+.profile-donation-copy { min-width: 0; }
+.profile-donation-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #826878;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.profile-donation h3 {
+  margin: 0 0 8px;
+  color: #24051b;
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 800;
+  line-height: 1.35;
+}
+.profile-donation p {
+  max-width: 580px;
+  margin: 0;
+  color: #6f5a62;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.profile-donation-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 12px 19px;
+  border-radius: 15px;
+  background: #53352b;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.2s ease;
+}
+.profile-donation-link:hover { background: #3d261f; }
+.profile-donation-link:focus-visible { outline: 3px solid #9d76cf; outline-offset: 3px; }
+@media (max-width: 780px) {
+  .profile-donation {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+    padding: 22px 20px;
+  }
+  .profile-donation-link { width: 100%; }
+}

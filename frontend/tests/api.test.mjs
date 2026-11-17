@@ -38,6 +38,23 @@ test("JWT is sent for private calls, never for public auth/preview", async () =>
   assert.equal(storage.get("roomie-access-token"), "jwt-token");
 });
 
+test("Google sign-in uses public ID token exchange; linking uses Roomie JWT", async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(url.endsWith("/link") ? { linked: true } : { access_token: "from-google" });
+  };
+  setToken("existing-roomie-jwt");
+  assert.equal((await api.googleLogin("google-id-token")).access_token, "from-google");
+  assert.equal((await api.linkGoogle("google-id-token")).linked, true);
+  assert.deepEqual(calls.map(({ url }) => url), ["/api/v1/auth/google", "/api/v1/auth/google/link"]);
+  assert.equal(calls[0].options.headers.get("Authorization"), null);
+  assert.equal(calls[1].options.headers.get("Authorization"), "Bearer existing-roomie-jwt");
+  assert.deepEqual(calls.map(({ options }) => JSON.parse(options.body)), [
+    { credential: "google-id-token" }, { credential: "google-id-token" },
+  ]);
+});
+
 test("create and join send the expected mutation payloads", async () => {
   const calls = [];
   globalThis.fetch = async (url, options) => {
@@ -81,6 +98,26 @@ test("shopping uses room-scoped authenticated calls and explicit done/undone", a
     assert.equal(options.headers.get("Authorization"), "Bearer shopping-token");
     assert.equal(options.signal, controller.signal);
   }
+});
+
+test("deleting shopping items uses an authenticated room-scoped DELETE and accepts 204", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(null, { status: 204 });
+  };
+  setToken("shopping-token");
+  assert.equal(await api.deleteShopping(7, 12, controller.signal), undefined);
+  assert.equal(calls[0].url, "/api/v1/rooms/7/shopping-items/12");
+  assert.equal(calls[0].options.method, "DELETE");
+  assert.equal(calls[0].options.body, undefined);
+  assert.equal(calls[0].options.headers.get("Authorization"), "Bearer shopping-token");
+  assert.equal(calls[0].options.signal, controller.signal);
+
+  globalThis.fetch = async () => Response.json({}, { status: 403 });
+  await assert.rejects(api.deleteShopping(7, 12), { status: 403 });
+  assert.equal(getToken(), "shopping-token");
 });
 
 test("shopping failures reject with actionable errors without changing the session", async () => {
@@ -352,6 +389,16 @@ test("network failures are retryable, aborts remain distinguishable", async () =
     throw new DOMException("Aborted", "AbortError");
   };
   await assert.rejects(api.rooms(controller.signal), { name: "AbortError" });
+});
+
+test("an uncertain write tells the user to check the result and sends the request once", async () => {
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    return Response.json({}, { status: 503, headers: { "Retry-After": "5" } });
+  };
+  await assert.rejects(api.addShopping(7, "Tea"), { status: 503, message: /перевірте результат/ });
+  assert.equal(attempts, 1);
 });
 
 test("invite links preserve codes, work locally and reject invalid input", () => {

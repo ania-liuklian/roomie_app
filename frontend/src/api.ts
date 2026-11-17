@@ -19,6 +19,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}, authenticated = true): Promise<T> {
+  const isRead = !options.method || options.method === "GET" || options.method === "HEAD";
+  const uncertainWrite = "Не вдалося підтвердити дію. Оновіть дані й перевірте результат перед повторною спробою.";
   const token = authenticated ? getToken() : null;
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
@@ -28,21 +30,25 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
     response = await fetch(`${baseUrl}${path}`, { ...options, headers });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new ApiError(0, "Не вдалося з’єднатися із сервером. Спробуйте ще раз.");
+    throw new ApiError(0, isRead ? "Не вдалося з’єднатися із сервером. Спробуйте ще раз." : uncertainWrite);
   }
   if (!response.ok) {
     if (response.status === 401 && token && getToken() === token) {
       setToken(null);
       window.dispatchEvent(new Event("roomie:unauthorized"));
     }
+    if (response.status >= 500 && !isRead) throw new ApiError(response.status, uncertainWrite);
     // Do not log bodies: future expense payloads can contain private notes.
     const messages: Record<number, string> = {
-      401: authenticated ? "Сесія завершилася. Увійдіть знову." : "Невірна пошта або пароль.",
+      401: path.startsWith("/auth/google") ? "Не вдалося підтвердити Google-акаунт." : authenticated ? "Сесія завершилася. Увійдіть знову." : "Невірна пошта або пароль.",
       403: "Немає доступу до цієї кімнати.",
       404: "Кімнату, запрошення або запис не знайдено.",
-      409: path === "/auth/register" ? "Ця електронна пошта вже зареєстрована."
+      409: path === "/auth/google" ? "Ця пошта вже має акаунт. Увійдіть за паролем і прив’яжіть Google у профілі."
+        : path === "/auth/google/link" ? "Не вдалося прив’язати Google: адреси електронної пошти мають збігатися, і акаунт не може бути вже прив’язаним."
+        : path === "/auth/register" ? "Ця електронна пошта вже зареєстрована."
         : path.includes("/settlements") ? "Сума перевищує поточний борг або вже очікує підтвердження. Оновіть баланс."
         : "Дані змінилися. Оновіть сторінку та спробуйте ще раз.",
+      503: "Сервер тимчасово недоступний. Зачекайте кілька секунд і оновіть дані.",
       422: path.startsWith("/auth/") ? "Перевірте введені дані. Пароль: щонайменше 8 символів, до 72 байтів UTF-8." : "Перевірте введені дані та спробуйте ще раз.",
     };
     throw new ApiError(response.status, messages[response.status] || "Не вдалося виконати дію. Спробуйте ще раз.");
@@ -106,6 +112,13 @@ export const api = {
   login: (email: string, password: string) => request<{ access_token: string }>("/auth/login", {
     method: "POST", body: JSON.stringify({ email, password }),
   }, false),
+  googleLogin: (credential: string) => request<{ access_token: string }>("/auth/google", {
+    method: "POST", body: JSON.stringify({ credential }),
+  }, false),
+  linkGoogle: (credential: string) => request<{ linked: boolean }>("/auth/google/link", {
+    method: "POST", body: JSON.stringify({ credential }),
+  }),
+  googleLinkStatus: (signal?: AbortSignal) => request<{ linked: boolean }>("/me/google", { signal }),
   register: (name: string, email: string, password: string) => request<{ access_token: string }>("/auth/register", {
     method: "POST", body: JSON.stringify({ name, email, password }),
   }, false),
@@ -127,6 +140,9 @@ export const api = {
   }),
   setShoppingDone: (roomId: number, itemId: number, done: boolean, signal?: AbortSignal) => request<ApiShoppingItem>(`/rooms/${roomId}/shopping-items/${itemId}`, {
     method: "PATCH", body: JSON.stringify({ done }), signal,
+  }),
+  deleteShopping: (roomId: number, itemId: number, signal?: AbortSignal) => request<void>(`/rooms/${roomId}/shopping-items/${itemId}`, {
+    method: "DELETE", signal,
   }),
   chores: (roomId: number, filter: ChoreFilter = "all", signal?: AbortSignal) => request<ApiChore[]>(`/rooms/${roomId}/chores?filter=${filter}`, { signal }),
   addChore: (roomId: number, data: ChoreCreate, signal?: AbortSignal) => request<ApiChore>(`/rooms/${roomId}/chores`, { method: "POST", body: JSON.stringify(data), signal }),

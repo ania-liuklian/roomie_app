@@ -9,9 +9,10 @@ from app.models import Chore, ChoreRotationMember, Expense, ExpenseShare, Room, 
 from sqlalchemy.orm import Session
 
 
-def test_domain_tables_persistence_timestamps_and_note_privacy(tmp_path, caplog):
-    engine = make_engine(f"sqlite:///{(tmp_path / 'models.db').as_posix()}")
-    Base.metadata.create_all(engine)
+def test_domain_tables_persistence_timestamps_and_note_privacy(database_url, caplog):
+    engine = make_engine(database_url)
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(engine)
     note = "PRIVATE-EXPENSE-NOTE-4441"
     with caplog.at_level(logging.DEBUG), Session(engine) as db:
         db.add_all([User(id=1, email="one@example.com", name="One", password_hash="unused"),

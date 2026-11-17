@@ -15,8 +15,8 @@ SECRET = "test-only-secret-with-at-least-32-bytes"
 
 
 @pytest.fixture
-def client(tmp_path):
-    app = create_app(f"sqlite:///{(tmp_path / 'test.db').as_posix()}", SECRET)
+def client(database_url):
+    app = create_app(database_url, SECRET)
     with TestClient(app) as client:
         yield client
 
@@ -140,7 +140,7 @@ def test_rooms_invites_access_and_idempotent_join(client):
         assert db.get(RoomMember, (rid, 2)).role == "member"
 
 
-def test_sqlite_foreign_keys_and_room_validation(client):
+def test_foreign_keys_and_room_validation(client):
     headers = register(client)
     assert client.post("/api/v1/rooms", json={"number": " "}, headers=headers).status_code == 422
     assert client.post("/api/v1/rooms", json={"number": "214", "accent": "bad"}, headers=headers).status_code == 422

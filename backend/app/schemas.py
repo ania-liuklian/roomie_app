@@ -60,6 +60,10 @@ class ProfileEdit(BaseModel):
         return value.strip()
 
 
+class GoogleCredential(BaseModel):
+    credential: str = Field(min_length=20, max_length=8192)
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

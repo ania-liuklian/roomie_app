@@ -1,9 +1,9 @@
 """In-app events only; never store expense notes or send external messages."""
 from fastapi import Depends, HTTPException, Query
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from .database import utcnow
+from .database import begin_snapshot, begin_write, utcnow
 from .models import Notification, User
 from .schemas import UserOut
 
@@ -30,12 +30,12 @@ def notification_out(db, item):
 def install_notifications(app, sessions, current_user):
     def read_db():
         with sessions() as db:
-            db.execute(text("BEGIN"))
+            begin_snapshot(db)
             yield db
 
     def write_db():
         with sessions() as db:
-            db.execute(text("BEGIN IMMEDIATE"))
+            begin_write(db)
             try:
                 yield db
                 db.commit()
@@ -59,7 +59,9 @@ def install_notifications(app, sessions, current_user):
 
     @app.post("/api/v1/notifications/{item_id}/read")
     def read_one(item_id: int, user: User = Depends(current_user), db: Session = Depends(write_db, scope="function")):
-        item = db.scalar(select(Notification).where(Notification.id == item_id, Notification.recipient_id == user.id))
+        item = db.scalar(select(Notification).where(
+            Notification.id == item_id, Notification.recipient_id == user.id
+        ).with_for_update())
         if item is None:
             raise HTTPException(404, "Notification not found")
         if item.read_at is None:
