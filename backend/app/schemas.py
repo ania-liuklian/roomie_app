@@ -69,13 +69,20 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
-class RoomCreate(BaseModel):
+class RoomName(BaseModel):
     number: str = Field(min_length=1, max_length=12)
-    accent: str = Field(default="#7063df", pattern=r"^#[0-9a-fA-F]{6}$")
 
     @field_validator("number")
     @classmethod
     def nonblank(cls, value):
         if not value.strip():
-            raise ValueError("Room number is required")
-        return value.strip()
+            raise ValueError("Room name is required")
+        return value
+
+
+class RoomCreate(RoomName):
+    accent: str = Field(default="#7063df", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class RoomRename(RoomName):
+    model_config = ConfigDict(extra="forbid")

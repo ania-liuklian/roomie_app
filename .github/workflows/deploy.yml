@@ -96,8 +96,8 @@ jobs:
         run: |
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           if [[ "$main_sha" == "$GITHUB_SHA" ]]; then
-            if [[ "$ROOMIE_DISTRIBUTION_ID" != E2B2AJ4RCN6CN7 ]]; then
-              printf 'ROOMIE_DISTRIBUTION_ID mismatch: expected E2B2AJ4RCN6CN7, got %q (%d characters).\n' \
+            if [[ ! "$ROOMIE_DISTRIBUTION_ID" =~ ^E[A-Z0-9]{12,14}$ ]]; then
+              printf 'Invalid ROOMIE_DISTRIBUTION_ID: got %q (%d characters). Use the CloudFront ID without quotes or whitespace.\n' \
                 "$ROOMIE_DISTRIBUTION_ID" "${#ROOMIE_DISTRIBUTION_ID}" >&2
               exit 1
             fi

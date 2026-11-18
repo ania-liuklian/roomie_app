@@ -38,6 +38,39 @@ test("JWT is sent for private calls, never for public auth/preview", async () =>
   assert.equal(storage.get("roomie-access-token"), "jwt-token");
 });
 
+test("room names pass through create, edit, and reload without formatting", async () => {
+  const calls = [];
+  const room = { id: 7, number: "", owner_id: 1, member_ids: [1] };
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options.method || "GET"]);
+    if (options.body) room.number = JSON.parse(options.body).number;
+    return Response.json(options.method ? room : [room]);
+  };
+  setToken("room-token");
+  assert.equal((await api.createRoom("123")).number, "123");
+  assert.equal((await api.renameRoom(7, "Наша оселя")).number, "Наша оселя");
+  assert.equal((await api.rooms())[0].number, "Наша оселя");
+  assert.equal((await api.renameRoom(7, "Кімната 123")).number, "Кімната 123");
+  assert.deepEqual(calls, [
+    ["/api/v1/rooms", "POST"], ["/api/v1/rooms/7", "PATCH"],
+    ["/api/v1/rooms", "GET"], ["/api/v1/rooms/7", "PATCH"],
+  ]);
+});
+
+test("room creation and rename reject overlength names without truncation or a request", async () => {
+  const names = [];
+  globalThis.fetch = async (_, options) => {
+    names.push(JSON.parse(options.body).number);
+    return Response.json({});
+  };
+  await api.createRoom("123456789012");
+  await api.renameRoom(7, "🏠".repeat(12));
+  const error = { status: 422, message: /не більше 12 символів/ };
+  await assert.rejects(api.createRoom("Наша квартира"), error);
+  await assert.rejects(api.renameRoom(7, "🏠".repeat(13)), error);
+  assert.deepEqual(names, ["123456789012", "🏠".repeat(12)]);
+});
+
 test("Google sign-in uses public ID token exchange; linking uses Roomie JWT", async () => {
   const calls = [];
   globalThis.fetch = async (url, options) => {

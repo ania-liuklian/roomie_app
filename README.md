@@ -2,6 +2,8 @@
 
 Roomie is a Ukrainian-language app for shared chores, expenses and repayments, shopping lists, room invites, avatars, and notifications. The Vite frontend calls the FastAPI backend under `/api/v1`.
 
+Room names support up to 12 characters. Room owners can rename their rooms, and the UI displays the saved name as entered.
+
 ## Local development
 
 Use Python 3.12 (the Lambda runtime) and Node.js 22.12 or later. These commands use a POSIX shell. On Windows, replace `source .venv/bin/activate` with `.\.venv\Scripts\Activate.ps1` and use `$env:NAME = "value"` to set environment variables.
@@ -68,10 +70,10 @@ The PostgreSQL tests create a uniquely named schema per test, apply Alembic, and
 
 ## AWS deployment
 
-The Frankfurt Terraform configuration and manual runbook are in [infra/README.md](infra/README.md). CloudFront serves the private S3 frontend and sends uncached API requests to API Gateway and FastAPI on Lambda. The prepared runtime uses private PostgreSQL connections to auto-pausing Aurora Serverless v2. The RDS Data API is enabled for explicit schema administration. The original Docker Compose deployment remains available.
+Roomie runs in Frankfurt (`eu-central-1`). CloudFront serves the React/Vite frontend from private S3 and forwards uncached `/api` requests to API Gateway and FastAPI on Lambda. Lambda connects to private Aurora PostgreSQL with psycopg and IAM authentication. RDS Data API is used for reviewed schema administration. Terraform and the operator runbook are under [infra/](infra/README.md). The local Docker Compose workflows remain available.
 
 See the [monthly cost comparison](infra/README.md#monthly-cost-review) for idle, light, and moderate traffic estimates and the single-instance EC2 alternative.
 
 ### GitHub Actions deployment
 
-Pull requests to `main` run SQLite and PostgreSQL integration tests, frontend checks, and credential-free Terraform validation. Pushes to `main` rerun those checks before releasing the Lambda code and frontend to the existing Frankfurt stack. Automatic releases are opt-in. Follow the [CI/CD setup and rollback runbook](infra/README.md#github-actions-cicd) to configure GitHub OIDC and test the first manual release.
+Pull requests to `main` run SQLite and PostgreSQL integration tests, frontend checks, and credential-free Terraform validation. Pushes to `main` rerun those checks before releasing the Lambda code and frontend to the existing Frankfurt stack. Automatic production deployment is enabled. GitHub Actions updates the existing Lambda and frontend without applying Terraform or running production migrations. See the [CI/CD setup and rollback runbook](infra/README.md#github-actions-cicd).

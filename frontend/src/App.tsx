@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { GoogleSignIn } from "./GoogleSignIn";
-import { api, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
+import { api, ROOM_NAME_MAX_LENGTH, getToken, setToken, inviteCode, inviteLink, formatTimestamp, currentWeek, type ApiChore, type ApiMember, type ApiRoom, type ApiShoppingItem, type InvitePreview } from "./api";
 import type { ApiDebt, ApiExpense, ApiMoney, ApiSettlement, ApiStats, ApiToday } from "./api";
 import { money } from "./money";
 import Avatar, { avatarOptions, type AvatarOptions } from "./Avatar";
@@ -10,7 +10,7 @@ import HomePage from "./HomePage";
 import { dueForSave, localDateTime } from "./choreForm";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
-type ModalName = "invite" | "join" | "room" | "chore" | "chore-edit" | "chore-delete" | "expense" | "shopping" | "shopping-delete" | null;
+type ModalName = "invite" | "join" | "room" | "room-edit" | "chore" | "chore-edit" | "chore-delete" | "expense" | "shopping" | "shopping-delete" | null;
 type Member = AvatarOptions & {
   id: number;
   name: string;
@@ -18,7 +18,7 @@ type Member = AvatarOptions & {
   color: string;
   email: string;
 };
-type Room = { id: number; number: string; memberIds: number[]; accent: string };
+type Room = { id: number; number: string; ownerId?: number; memberIds: number[]; accent: string };
 type Chore = {
   id: number;
   roomId: number;
@@ -223,7 +223,7 @@ function mergeMembers(existing: Member[], users: (ApiMember | null | undefined)[
 }
 
 function toRoom(room: ApiRoom): Room {
-  return { id: room.id, number: room.number, accent: room.accent, memberIds: room.member_ids };
+  return { id: room.id, number: room.number, accent: room.accent, ownerId: room.owner_id, memberIds: room.member_ids };
 }
 
 function toShoppingItem(item: ApiShoppingItem): ShoppingItem {
@@ -639,7 +639,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     return () => { controller.abort(); todayRequest.current = null; };
   }, [roomId, page, todayReload]);
 
-  const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", memberIds: [], accent: "#7063df" };
+  const room = rooms.find((item) => item.id === roomId) || { id: 0, number: "", ownerId: undefined, memberIds: [], accent: "#7063df" };
   const roomMembers = members.filter((member) => room.memberIds.includes(member.id));
   const workloads = stats?.workloads.find((item) => item.room_id === roomId)?.members;
   const roomExpenses = expenses.filter((expense) => expense.roomId === roomId);
@@ -746,22 +746,27 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     setModal("join");
   };
 
-  const createRoom = async (event: FormEvent<HTMLFormElement>) => {
+  const saveRoom = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (actionBusy) return;
-    const number = String(new FormData(event.currentTarget).get("number")).trim();
-    if (!number) { setActionError("Введіть номер кімнати."); return; }
+    const number = String(new FormData(event.currentTarget).get("number") ?? "");
+    if (!number.trim()) { setActionError("Введіть назву кімнати."); return; }
+    const editing = modal === "room-edit";
     setActionBusy(true);
     setActionError("");
     try {
-      const created = toRoom(await api.createRoom(number));
-      setRooms((items) => [...items, created]);
-      setRoomId(created.id);
+      const saved = toRoom(editing ? await api.renameRoom(roomId, number) : await api.createRoom(number));
+      setRooms((items) => editing
+        ? items.map((item) => item.id === saved.id ? saved : item)
+        : [...items, saved]);
+      if (!editing) {
+        setRoomId(saved.id);
+        setPage("room");
+      }
       setModal(null);
-      setPage("room");
-      notify(`Кімнату ${created.number} створено`);
+      notify(editing ? "Назву змінено" : "Кімнату створено");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Не вдалося створити кімнату.");
+      setActionError(error instanceof Error ? error.message : "Не вдалося зберегти кімнату.");
     } finally { setActionBusy(false); }
   };
 
@@ -779,7 +784,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
       setJoinInput("");
       window.history.replaceState(null, "", import.meta.env.BASE_URL);
       setPage("room");
-      notify(`Ви приєдналися до кімнати ${joined.number}`);
+      notify("Ви приєдналися до кімнати");
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Не вдалося приєднатися.");
     } finally { setActionBusy(false); }
@@ -939,7 +944,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
     chores: { title: "Обов’язки", subtitle: "" },
     shopping: { title: "Список покупок", subtitle: "" },
     money: { title: "Спільні гроші", subtitle: "" },
-    room: { title: `Кімната ${room.number}`, subtitle: "" },
+    room: { title: room.number, subtitle: "" },
     profile: { title: "Мій профіль", subtitle: "" },
   };
 
@@ -953,7 +958,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
   };
 
   const roomDialogs = <>
-    {modal === "invite" && <Modal title={`Запросити до кімнати ${room.number}`} note="Поділіться посиланням, щоб додати нового мешканця." onClose={closeRoomDialog}>
+    {modal === "invite" && <Modal title={room.number} note="Поділіться посиланням, щоб додати нового мешканця." onClose={closeRoomDialog}>
       <div className="invite-modal-content">
         <span className="modal-illustration"><Icon name="link" size={30} /></span>
         <h3>Одне посилання — і roomie всередині</h3>
@@ -966,7 +971,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
         {actionError && <p role="alert">{actionError}</p>}
       </div>
     </Modal>}
-    {modal === "join" && <Modal title={preview ? `Кімната ${preview.number}` : "Приєднатися до кімнати"} note="Відкрийте запрошення або введіть код кімнати." onClose={closeRoomDialog}>
+    {modal === "join" && <Modal title={preview ? preview.number : "Приєднатися до кімнати"} note="Відкрийте запрошення або введіть код кімнати." onClose={closeRoomDialog}>
       <form className="form" onSubmit={(event) => {
         event.preventDefault();
         const code = inviteCode(joinInput);
@@ -982,20 +987,26 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
       <div className="join-preview" aria-busy={previewLoading || actionBusy}>
         {previewLoading && <p role="status">Завантаження запрошення…</p>}
         {previewError && <><p role="alert">{previewError}</p>{pendingCode && <button className="ghost-button" disabled={actionBusy} onClick={() => setPreviewRetry((value) => value + 1)}>Спробувати ще раз</button>}</>}
-        {preview && <><h3>Вас запросили жити разом</h3><p>Кімната {preview.number}</p>
+        {preview && <><h3>Вас запросили жити разом</h3><p>{preview.number}</p>
           <p>Після приєднання ви побачите спільні справи, покупки та розрахунки.</p>
           <button className="primary-button" disabled={actionBusy || previewLoading} onClick={joinRoom}>{actionBusy ? "Приєднання…" : "Приєднатися"}<Icon name="arrow" size={16} /></button>
         </>}
         {actionError && <p role="alert">{actionError}</p>}
       </div>
     </Modal>}
-    {modal === "room" && <Modal title="Створити нову кімнату" note="Можна мати кілька кімнат і легко перемикатися між ними." onClose={closeRoomDialog}>
-      <form className="form" onSubmit={createRoom} aria-busy={actionBusy}>
-        <label>Номер кімнати<input name="number" required maxLength={12} disabled={actionBusy} placeholder="Наприклад, 305-Б" /></label>
+    {(modal === "room" || modal === "room-edit") && <Modal
+      title={modal === "room-edit" ? "Змінити назву кімнати" : "Створити нову кімнату"}
+      onClose={closeRoomDialog}
+    >
+      <form className="form" onSubmit={saveRoom} aria-busy={actionBusy}>
+        <label>Назва кімнати<input name="number" required disabled={actionBusy}
+          aria-describedby="room-name-limit"
+          defaultValue={modal === "room-edit" ? room.number : ""} placeholder="Наприклад, 305-Б" /></label>
+        <small id="room-name-limit">До {ROOM_NAME_MAX_LENGTH} символів</small>
         {actionError && <p role="alert">{actionError}</p>}
         <div className="modal-actions">
           <button type="button" className="outline-button" disabled={actionBusy} onClick={closeRoomDialog}>Скасувати</button>
-          <button className="primary-button" disabled={actionBusy}>{actionBusy ? "Створення…" : "Створити кімнату"}</button>
+          <button className="primary-button" disabled={actionBusy}>{actionBusy ? "Збереження…" : modal === "room-edit" ? "Зберегти назву" : "Створити кімнату"}</button>
         </div>
       </form>
     </Modal>}
@@ -1027,7 +1038,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
             <select value={roomId} onChange={(event) => setRoomId(Number(event.target.value))}>
               {rooms.map((item) => (
                 <option value={item.id} key={item.id}>
-                  Кімната {item.number}
+                  {item.number}
                 </option>
               ))}
             </select>
@@ -1107,7 +1118,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
           <div className="page today-page" aria-busy={todayLoading || todaySaving}>
             <div className="today-title">
               <h2>Сьогодні</h2>
-              <p>Кімната {room.number}</p>
+              <p>{room.number}</p>
             </div>
             {todayLoading && <p role="status">Завантаження підсумку дня…</p>}
             {todaySaving && <p role="status">Збереження…</p>}
@@ -1492,10 +1503,14 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
             <section className="room-cover">
               <div className="room-cover-main">
                 <span>ВАША СПІЛЬНА КІМНАТА</span>
-                <h2>Кімната {room.number}</h2>
+                <h2>{room.number}</h2>
                 <p>{roomMembers.length} мешканці</p>
               </div>
               <div className="room-cover-actions">
+                {room.ownerId === currentUserId && <button onClick={() => {
+                  setActionError("");
+                  setModal("room-edit");
+                }}>Змінити назву</button>}
                 <button onClick={() => setModal("invite")}>
                   <Icon name="link" size={18} />
                   Запросити за посиланням
@@ -1631,7 +1646,7 @@ function ConnectedApp({ currentUser, onLogout, onProfileSaved }: { currentUser: 
                   key={item.id}
                 >
                   <span>
-                    <strong>Кімната {item.number}</strong>
+                    <strong>{item.number}</strong>
                     <small>{item.memberIds.length} мешканці</small>
                   </span>
                   {item.id === roomId && <i>АКТИВНА</i>}
