@@ -109,6 +109,7 @@ export type ApiShoppingItem = {
 };
 
 export const api = {
+  home: (signal?: AbortSignal) => request<{ features: { id: string; title: string; description: string }[] }>("/home", { signal }, false),
   login: (email: string, password: string) => request<{ access_token: string }>("/auth/login", {
     method: "POST", body: JSON.stringify({ email, password }),
   }, false),

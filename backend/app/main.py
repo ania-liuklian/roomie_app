@@ -182,6 +182,17 @@ def create_app(database_url=None, jwt_secret=None, *, create_schema=None, connec
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/v1/home")
+    def home():
+        return {"features": [
+            {"id": "chores", "title": "Обов’язки",
+             "description": "Розподіляйте справи й налаштовуйте чергування на щотижневі завдання."},
+            {"id": "shopping", "title": "Покупки",
+             "description": "Ведіть спільний список і відмічайте те, що вже купили."},
+            {"id": "expenses", "title": "Витрати",
+             "description": "Записуйте спільні витрати й бачте, хто кому винен."},
+        ]}
+
     @app.get("/api/v1/me", response_model=UserOut)
     def me(user: User = Depends(current_user)):
         return user

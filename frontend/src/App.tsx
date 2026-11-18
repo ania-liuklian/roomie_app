@@ -6,6 +6,7 @@ import { money } from "./money";
 import Avatar, { avatarOptions, type AvatarOptions } from "./Avatar";
 import AvatarPicker from "./AvatarPicker";
 import NotificationBell from "./NotificationBell";
+import HomePage from "./HomePage";
 import { dueForSave, localDateTime } from "./choreForm";
 
 type Page = "today" | "chores" | "shopping" | "money" | "room" | "profile";
@@ -255,8 +256,12 @@ function SessionPanel({ children }: { children: React.ReactNode }) {
   </section></div>;
 }
 
-function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
-  const [register, setRegister] = useState(false);
+function AuthScreen({ onAuthenticated, initialRegister, fromInvite }: {
+  onAuthenticated: (token: string) => void;
+  initialRegister: boolean;
+  fromInvite: boolean;
+}) {
+  const [register, setRegister] = useState(initialRegister);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -280,7 +285,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => v
   return <SessionPanel>
     <form className="form" onSubmit={submit} aria-busy={busy}>
       <h3>{register ? "Створити акаунт" : "Увійти"}</h3>
-      {inviteCode(window.location.href) && <p>Увійдіть або зареєструйтеся, щоб приєднатися за запрошенням.</p>}
+      {fromInvite && <p>Увійдіть або зареєструйтеся, щоб приєднатися за запрошенням.</p>}
       {register && <label>Ім’я<input name="name" autoComplete="name" required maxLength={100} disabled={busy} /></label>}
       <label>Електронна пошта<input name="email" type="email" autoComplete="email" required disabled={busy} /></label>
       <label>Пароль<input name="password" type="password" minLength={8} required autoComplete={register ? "new-password" : "current-password"} disabled={busy} /></label>
@@ -304,6 +309,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (token: string) => v
         }
       }} />
       </>}
+      {!fromInvite && <a className="home-auth-back" href={import.meta.env.BASE_URL}>← На головну</a>}
     </form>
   </SessionPanel>;
 }
@@ -316,7 +322,13 @@ export default function App() {
   const logout = () => { setToken(null); setAccessToken(null); setMe(null); setError(""); };
 
   useEffect(() => {
-    const expired = () => { setAccessToken(null); setMe(null); };
+    const expired = () => {
+      if (!inviteCode(window.location.href)) {
+        window.history.replaceState(null, "", `${import.meta.env.BASE_URL}?auth=login`);
+      }
+      setAccessToken(null);
+      setMe(null);
+    };
     window.addEventListener("roomie:unauthorized", expired);
     return () => window.removeEventListener("roomie:unauthorized", expired);
   }, []);
@@ -334,7 +346,17 @@ export default function App() {
     return () => controller.abort();
   }, [token, retry]);
 
-  if (!token) return <AuthScreen onAuthenticated={(value) => { setToken(value); setAccessToken(value); }} />;
+  if (!token) {
+    const fromInvite = Boolean(inviteCode(window.location.href));
+    const auth = new URLSearchParams(window.location.search).get("auth");
+    if (!fromInvite && auth !== "login" && auth !== "register") return <HomePage />;
+    return <AuthScreen initialRegister={auth === "register"} fromInvite={fromInvite}
+      onAuthenticated={(value) => {
+        if (!fromInvite) window.history.replaceState(null, "", import.meta.env.BASE_URL);
+        setToken(value);
+        setAccessToken(value);
+      }} />;
+  }
   if (!me) return <SessionPanel><div className="form">
     {error ? <><p role="alert">{error}</p><button className="primary-button" onClick={() => setRetry(retry + 1)}>Спробувати ще раз</button></> : <p role="status">Завантаження профілю…</p>}
     <button className="ghost-button" onClick={logout}>Вийти</button>

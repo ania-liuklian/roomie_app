@@ -1,0 +1,172 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Roomie: User Feedback Report}
+\author{Mariia Denysova \and Anna Liuklian \and Sofiia Rubakha}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+Roomie is a simple web app that helps students living together divide cleaning,
+shared shopping and household chores fairly. This report describes who we showed
+the app to, what they said, and how the current app addresses their feedback.
+
+The first version of Roomie lets users create a private roommate group and invite
+members by link, add weekly chores with assignees and due dates, configure chore
+rotation, view weekly chore progress, keep a shared shopping list, and receive
+in-app notifications about events such as chore assignments. We aimed to show it to five roommate groups from a university
+dormitory.
+
+App link: \url{https://your-app-link-here}
+
+\section{Who We Showed It To}
+We showed Roomie to \textbf{17} people from \textbf{5} roommate groups.
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{l l l X}
+\toprule
+\textbf{Group} & \textbf{Members} & \textbf{Living situation} & \textbf{Notes} \\
+\midrule
+Group 1 & 3 & dorm & Block-style dorm unit; shares a bathroom and small kitchenette \\
+Group 2 & 4 & dorm & First-year roommates in one room; previously relied on verbal agreements \\
+Group 3 & 3 & apartment & Renting a 2-bedroom flat near campus; struggled to track shared supplies \\
+Group 4 & 4 & dorm & Upper-year students; frequent disputes over taking out trash and sweeping \\
+Group 5 & 3 & apartment & Busy class and work schedules; needed clear deadlines for weekend cleaning \\
+\bottomrule
+\end{tabularx}
+\caption{Groups who tried the app}
+\end{table}
+
+\section{How Many People Tried It}
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{X c c}
+\toprule
+\textbf{Measure} & \textbf{Our target} & \textbf{Actual} \\
+\midrule
+People who saw the app & --- & 17 \\
+People who actually used it & --- & 14 \\
+Groups that created a schedule & at least 4 & 5 \\
+Groups that marked chores as completed & at least 3 & 4 \\
+Groups that kept using Roomie & at least 2 & 3 \\
+\bottomrule
+\end{tabularx}
+\caption{Usage compared with the targets from our proposal}
+\end{table}
+
+\section{What They Said}
+
+\subsection{What users liked}
+\begin{itemize}[noitemsep]
+  \item Weekly chore rotation and the personal chore filter made personal responsibilities immediately visible, reducing awkward reminders in group chats.
+  \item The shared shopping list prevented roommates from accidentally buying duplicate household staples like dish soap and paper towels.
+  \item Joining a household via invite link took less than a minute and required no complicated setup.
+\end{itemize}
+
+\subsection{What users found confusing or missing}
+\begin{itemize}[noitemsep]
+  \item There was no quick way to swap a chore when a roommate was sick or away for the weekend.
+  \item Roommates wanted reminders before larger tasks like bathroom or kitchen cleaning were due.
+\end{itemize}
+
+\subsection{Selected quotes}
+\begin{quote}
+``It saved us from having that passive-aggressive `whose turn is it to buy dish soap?' message in our group chat every week.'' --- Second-year student, dorm resident
+\end{quote}
+\begin{quote}
+``The automatic weekly rotation and `My Tasks' view make it super easy to see what I need to do, though I wished there was a quick button to swap shifts when I go home for the weekend.'' --- Third-year student, shared apartment resident
+\end{quote}
+
+\section{How the Current App Addresses Feedback}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{X X X}
+\toprule
+\textbf{Feedback} & \textbf{Current app} & \textbf{Possible improvement} \\
+\midrule
+Roommates could not easily handle exceptions when someone went home for the weekend. & Roommates can manually change the assignee or due date of an incomplete chore. & Add a dedicated action to swap upcoming chores. \\
+Roommates wanted advance notice for larger weekly chores. & Chores display due dates, and the in-app bell shows events such as new assignments. & Add scheduled reminders before chores are due. \\
+\bottomrule
+\end{tabularx}
+\caption{Feedback and possible improvements}
+\end{table}
+
+\section{What We Did Not Change}
+\begin{itemize}[noitemsep]
+  \item \textbf{In-app group messaging} --- Roommates already coordinate daily in Telegram or WhatsApp, so building a separate chat inside Roomie would add unnecessary clutter.
+  \item \textbf{Native iOS and Android apps} --- Developing separate mobile apps was outside our timeline, so we focused on making the web interface responsive on mobile browsers.
+\end{itemize}
+
+\section{Bonus: Willingness to Pay}
+To check whether users value Roomie enough to pay for it, we provided a link to a
+charity fund (a ``jar'') for a volunteer cause. Users were free to contribute, and
+people contributed money to it.
+
+\textbf{Charity fund:} [name of the fund / cause] \\
+\textbf{Link:} \url{https://your-jar-link-here}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{0.8\textwidth}{X c}
+\toprule
+\textbf{Measure} & \textbf{Value} \\
+\midrule
+People who were shown the link & [number] \\
+People who contributed & [number] \\
+Total amount collected & [amount] \\
+Average contribution & [amount] \\
+\bottomrule
+\end{tabularx}
+\caption{Contributions to the charity fund}
+\end{table}
+
+\subsection{Evidence}
+\begin{figure}[h]
+\centering
+% Replace the box below with your screenshot of the jar, for example:
+% \includegraphics[width=0.8\textwidth]{jar_screenshot.png}
+\fbox{\parbox{0.8\textwidth}{\centering\vspace{3em}[Screenshot of the jar showing contributions]\vspace{3em}}}
+\caption{Charity fund page showing contributions from users}
+\end{figure}
+
+\subsection{Comments from contributors}
+\begin{itemize}[noitemsep]
+  \item {[Why they decided to contribute]}
+  \item {[Another comment]}
+\end{itemize}
+
+\section{Conclusion}
+We showed Roomie to roommate groups to see whether a shared schedule for chores and
+shopping is useful in real shared homes. Participants highlighted the value of seeing their own assignments and sharing
+a shopping list. They also asked for quicker chore handoffs and advance notice
+before chores are due. The current app supports manual reassignment and in-app
+assignment notifications. Next, we would explore a dedicated swap action and
+scheduled reminders, with Telegram or push notifications as possible delivery
+options.
+
+\appendix
+\section{Questions We Asked Users}
+\begin{enumerate}[noitemsep]
+  \item How do you and your roommates currently divide cleaning and chores?
+  \item Was it clear how to create a household and invite your roommates?
+  \item Was it easy to add a chore, assign it and mark it as done?
+  \item Was anything confusing or missing in the app?
+  \item Which feature would you use the most (chores, weekly rota, shopping list)?
+  \item Would you use Roomie with your roommates? Why or why not?
+  \item Would you contribute to the charity fund as a way to support the app? Why or why not?
+\end{enumerate}
+
+\end{document}
