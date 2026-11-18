@@ -71,6 +71,8 @@ jobs:
     environment:
       name: production
       url: ${{ vars.ROOMIE_SITE_URL }}
+    env:
+      ROOMIE_DISTRIBUTION_ID: ${{ vars.ROOMIE_DISTRIBUTION_ID }}
     concurrency:
       group: roomie-production
       cancel-in-progress: false
@@ -85,7 +87,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.package.outputs.artifact-id }}
           path: ${{ runner.temp }}/roomie-release
-      - name: Guard against deploying a superseded main commit
+      - name: Verify main commit and production deployment settings
         id: main-tip
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,6 +96,11 @@ jobs:
         run: |
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           if [[ "$main_sha" == "$GITHUB_SHA" ]]; then
+            if [[ "$ROOMIE_DISTRIBUTION_ID" != E2B2AJ4RCN6CN7 ]]; then
+              printf 'ROOMIE_DISTRIBUTION_ID mismatch: expected E2B2AJ4RCN6CN7, got %q (%d characters).\n' \
+                "$ROOMIE_DISTRIBUTION_ID" "${#ROOMIE_DISTRIBUTION_ID}" >&2
+              exit 1
+            fi
             if [[ ! "$ROOMIE_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ||
                   "$ROOMIE_DEPLOY_ROLE_ARN" != arn:aws:iam::"$ROOMIE_AWS_ACCOUNT_ID":role/* ]]; then
               echo 'Set the production AWS account ID and a deployment role ARN in that account.' >&2
@@ -117,6 +124,5 @@ jobs:
         env:
           ROOMIE_LAMBDA_FUNCTION: ${{ vars.ROOMIE_LAMBDA_FUNCTION }}
           ROOMIE_FRONTEND_BUCKET: ${{ vars.ROOMIE_FRONTEND_BUCKET }}
-          ROOMIE_DISTRIBUTION_ID: ${{ vars.ROOMIE_DISTRIBUTION_ID }}
           ROOMIE_SITE_URL: ${{ vars.ROOMIE_SITE_URL }}
         run: bash infra/deploy-release.sh "$RUNNER_TEMP/roomie-release"
