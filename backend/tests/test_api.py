@@ -140,6 +140,64 @@ def test_rooms_invites_access_and_idempotent_join(client):
         assert db.get(RoomMember, (rid, 2)).role == "member"
 
 
+def test_room_names_survive_create_rename_and_reload(client, database_url):
+    owner = register(client)
+    member = register(client, "member@example.com")
+    created = client.post("/api/v1/rooms", json={"number": "123"}, headers=owner)
+    assert created.status_code == 201
+    room = created.json()
+    assert room["number"] == "123"
+    room_path = f"/api/v1/rooms/{room['id']}"
+    invite_path = f"/api/v1/invites/{room['invite_code']}"
+    assert client.get(invite_path).json()["number"] == "123"
+    assert client.post(f"{invite_path}/join", headers=member).status_code == 200
+
+    intentional_prefix = client.post("/api/v1/rooms", json={"number": "Кімната 123"}, headers=owner)
+    assert intentional_prefix.status_code == 201
+    assert intentional_prefix.json()["number"] == "Кімната 123"
+
+    new_name = "Наша оселя"
+    assert client.patch(room_path, json={"number": new_name}, headers=member).status_code == 403
+    assert client.patch(room_path, json={"number": " "}, headers=owner).status_code == 422
+    updated = client.patch(room_path, json={"number": new_name}, headers=owner)
+    assert updated.status_code == 200
+    assert updated.json()["number"] == new_name
+    assert updated.json()["id"] == room["id"]
+    assert updated.json()["owner_id"] == room["owner_id"]
+    assert updated.json()["member_ids"] == [1, 2]
+
+    with TestClient(create_app(database_url, SECRET)) as refreshed:
+        assert refreshed.get(room_path, headers=member).json()["number"] == new_name
+        assert refreshed.get(invite_path).json()["number"] == new_name
+        names = [item["number"] for item in refreshed.get("/api/v1/rooms", headers=owner).json()]
+        assert names == [new_name, "Кімната 123"]
+
+
+def test_room_creation_and_rename_enforce_twelve_characters(client):
+    owner = register(client)
+    at_limit = "123456789012"
+    over_limit = at_limit + "3"
+    too_long = client.post("/api/v1/rooms", json={"number": over_limit}, headers=owner)
+    assert too_long.status_code == 422
+    assert "at most 12 characters" in too_long.json()["detail"][0]["msg"]
+    assert client.get("/api/v1/rooms", headers=owner).json() == []
+
+    created = client.post("/api/v1/rooms", json={"number": at_limit}, headers=owner)
+    assert created.status_code == 201
+    assert created.json()["number"] == at_limit
+    path = f"/api/v1/rooms/{created.json()['id']}"
+
+    unicode_boundary = "🏠" * 12
+    renamed = client.patch(path, json={"number": unicode_boundary}, headers=owner)
+    assert renamed.status_code == 200
+    assert renamed.json()["number"] == unicode_boundary
+
+    too_long = client.patch(path, json={"number": unicode_boundary + "🏠"}, headers=owner)
+    assert too_long.status_code == 422
+    assert "at most 12 characters" in too_long.json()["detail"][0]["msg"]
+    assert client.get(path, headers=owner).json()["number"] == unicode_boundary
+
+
 def test_foreign_keys_and_room_validation(client):
     headers = register(client)
     assert client.post("/api/v1/rooms", json={"number": " "}, headers=headers).status_code == 422

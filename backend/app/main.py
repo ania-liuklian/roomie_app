@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .database import Base, begin_snapshot, begin_write, make_engine, utcnow
 from .models import Chore, GoogleIdentity, Room, RoomInvite, RoomMember, User, lock_room
-from .schemas import Credentials, GoogleCredential, ProfileEdit, Register, RoomCreate, TokenOut, UserOut
+from .schemas import Credentials, GoogleCredential, ProfileEdit, Register, RoomCreate, RoomRename, TokenOut, UserOut
 from .notifications import install_notifications, notify
 from .google_auth import verify_google_credential
 
@@ -99,7 +99,7 @@ def create_app(database_url=None, jwt_secret=None, *, create_schema=None, connec
             raise HTTPException(403, "Room membership required")
 
     def room_out(db, room):
-        return {"id": room.id, "number": room.number, "accent": room.accent,
+        return {"id": room.id, "number": room.number, "accent": room.accent, "owner_id": room.created_by_id,
                 "created_at": room.created_at, "updated_at": room.updated_at,
                 "member_ids": list(db.scalars(select(RoomMember.user_id).where(RoomMember.room_id == room.id).order_by(RoomMember.user_id)))}
 
@@ -250,6 +250,16 @@ def create_app(database_url=None, jwt_secret=None, *, create_schema=None, connec
     def get_room(room_id: int, user: User = Depends(current_user), db: Session = Depends(db_session)):
         require_member(db, room_id, user.id)
         return room_out(db, db.get(Room, room_id))
+
+    @app.patch("/api/v1/rooms/{room_id}")
+    def rename_room(room_id: int, data: RoomRename, user: User = Depends(current_user), db: Session = Depends(db_session)):
+        require_member(db, room_id, user.id)
+        room = db.get(Room, room_id)
+        if room.created_by_id != user.id:
+            raise HTTPException(403, "Only the room owner can rename it")
+        room.number = data.number
+        db.commit()
+        return room_out(db, room)
 
     @app.get("/api/v1/rooms/{room_id}/members", response_model=list[UserOut])
     def members(room_id: int, user: User = Depends(current_user), db: Session = Depends(db_session)):

@@ -73,13 +73,14 @@ All paths below have prefix `/api/v1`.
 | POST | `/notifications/read-all` | Mark only the caller's unread notifications read. |
 | POST | `/rooms` | Create room, owner membership and random invite in one transaction (201). Body: `number`, optional hex `accent`. Returns room and `invite_code`. |
 | GET | `/rooms` | Only the authenticated user's rooms. |
-| GET | `/rooms/{room_id}` | Member-only room details and `member_ids`. |
+| GET | `/rooms/{room_id}` | Member-only room details, `owner_id`, and `member_ids`. |
+| PATCH | `/rooms/{room_id}` | Room creator only. Updates the display name in `number` and returns the room. |
 | GET | `/rooms/{room_id}/members` | Member-only profiles. |
 | GET | `/rooms/{room_id}/invite` | Member-only reusable code and frontend invite path. |
 | GET | `/invites/{code}` | Public limited preview: number and accent only. |
 | POST | `/invites/{code}/join` | Authenticated join; repeat joins return the same membership without changing its role. |
 
-Invites have no expiry or revocation. Codes contain 24 random bytes encoded as URL-safe text. Room numbers are labels, not globally unique. Authenticated nonmembers receive 403 for private room resources; missing rooms or resources return 404, and unauthenticated requests return 401. API field names use snake_case; future frontend integration must adapt existing camelCase types. Profile initials are derived from the user's name.
+Invites have no expiry or revocation. Codes contain 24 random bytes encoded as URL-safe text. Room names use the existing API field `number`. They can contain up to 12 characters and are displayed as saved. Names need not be unique. Authenticated nonmembers receive 403 for private room resources; missing rooms or resources return 404, and unauthenticated requests return 401. API field names use snake_case. Profile initials are derived from the user's name.
 
 ### Domain routes
 
@@ -221,7 +222,7 @@ Frontend integration includes Today, chores and their edit/delete menu, shopping
 
 `PATCH /me` accepts optional `name` (trimmed, nonblank, at most 100 characters), palette `color`, `eye_style`, and `gaze`. It always updates the authenticated user, rejects attempts to change ID/email/password fields, and returns the same safe shape as `GET /me`. The frontend profile picker previews a local draft and submits name and avatar options together through the existing Save button.
 
-`GET /me/stats` returns `{room_count, completed_chores, workloads: [{room_id, members: [{user_id, unfinished_chores, workload_percent}]}]}`. Counts include only rooms the caller belongs to; completed count covers their own assigned completed occurrences, and unfinished workload includes waiting/active occurrences assigned to each current member. Bar percentages are each member's fraction of the room's unfinished count, rounded to whole percentages; empty rooms return zero percentages. The endpoint reads a consistent SQLite snapshot and does not expose other rooms. No frontend chore cache is used for these metrics.
+`GET /me/stats` returns `{room_count, completed_chores, workloads: [{room_id, members: [{user_id, unfinished_chores, workload_percent}]}]}`. Counts include only rooms the caller belongs to; completed count covers their own assigned completed occurrences, and unfinished workload includes waiting/active occurrences assigned to each current member. Bar percentages are each member's fraction of the room's unfinished count, rounded to whole percentages; empty rooms return zero percentages. The endpoint reads a consistent database snapshot and does not expose other rooms. No frontend chore cache is used for these metrics.
 
 Runtime environment files and database files must remain untracked; only empty/documentation `.env.example` templates belong in Git. Backend test fixtures contain intentionally fake test-only credentials. Never use them as real configuration.
 

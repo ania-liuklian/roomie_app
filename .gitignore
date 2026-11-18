@@ -14,6 +14,12 @@
 *.p12
 *.pfx
 
+# Local cloud tooling credentials
+.aws/
+.terraformrc
+terraform.rc
+credentials.tfrc.json
+
 # Terraform
 **/.terraform/
 *.tfstate

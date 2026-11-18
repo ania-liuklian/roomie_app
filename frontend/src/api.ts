@@ -67,7 +67,7 @@ export type ApiNotification = {
   created_at: string; read_at: string | null;
 };
 export type ApiNotifications = { items: ApiNotification[]; unread_count: number; total: number };
-export type ApiRoom = { id: number; number: string; accent: string; member_ids: number[]; created_at: string; updated_at: string };
+export type ApiRoom = { id: number; number: string; accent: string; owner_id?: number; member_ids: number[]; created_at: string; updated_at: string };
 export type InvitePreview = { number: string; accent: string };
 export type ChoreFilter = "all" | "mine" | "waiting" | "done";
 export type ApiChore = {
@@ -108,6 +108,16 @@ export type ApiShoppingItem = {
   created_by_id: number; created_at: string; updated_at: string;
 };
 
+export const ROOM_NAME_MAX_LENGTH = 12;
+
+async function saveRoomName(path: string, method: "POST" | "PATCH", number: string) {
+  // Count Unicode code points, as Python and PostgreSQL do.
+  if ([...number].length > ROOM_NAME_MAX_LENGTH) {
+    throw new ApiError(422, `Назва кімнати має містити не більше ${ROOM_NAME_MAX_LENGTH} символів.`);
+  }
+  return request<ApiRoom>(path, { method, body: JSON.stringify({ number }) });
+}
+
 export const api = {
   home: (signal?: AbortSignal) => request<{ features: { id: string; title: string; description: string }[] }>("/home", { signal }, false),
   login: (email: string, password: string) => request<{ access_token: string }>("/auth/login", {
@@ -132,7 +142,8 @@ export const api = {
   rooms: (signal?: AbortSignal) => request<ApiRoom[]>("/rooms", { signal }),
   members: (roomId: number, signal?: AbortSignal) => request<ApiMember[]>(`/rooms/${roomId}/members`, { signal }),
   invite: (roomId: number, signal?: AbortSignal) => request<{ code: string; path: string }>(`/rooms/${roomId}/invite`, { signal }),
-  createRoom: (number: string) => request<ApiRoom>("/rooms", { method: "POST", body: JSON.stringify({ number }) }),
+  createRoom: (number: string) => saveRoomName("/rooms", "POST", number),
+  renameRoom: (roomId: number, number: string) => saveRoomName(`/rooms/${roomId}`, "PATCH", number),
   previewInvite: (code: string, signal?: AbortSignal) => request<InvitePreview>(`/invites/${encodeURIComponent(code)}`, { signal }, false),
   joinRoom: (code: string) => request<ApiRoom>(`/invites/${encodeURIComponent(code)}/join`, { method: "POST" }),
   shopping: (roomId: number, signal?: AbortSignal) => request<ApiShoppingItem[]>(`/rooms/${roomId}/shopping-items`, { signal }),

@@ -1,6 +1,6 @@
 # Roomie frontend
 
-Auth, rooms, members, invitation joining, shopping, chores, money and Today now use the backend. Existing CSS is unchanged. There are no seed records or localStorage calls. Only the auth token is stored in the browser, in sessionStorage; all other state is transient API results or form/UI state.
+The frontend uses React and Vite. It stores the auth token in sessionStorage and reloads room and domain data from the API.
 
 ## Run both servers locally (PowerShell)
 
@@ -21,7 +21,7 @@ Terminal 2, frontend:
 
 ```powershell
 cd frontend
-npm.cmd install
+npm.cmd ci
 npm.cmd run dev
 ```
 
@@ -42,7 +42,7 @@ JWTs live in sessionStorage (per tab, survives reload), and are sent as Bearer t
 
 ## Test step 1
 
-1. Register a new account. Confirm the empty-room state, then create a room.
+1. Register a new account. Confirm the empty-room state, then create a room named “123”. Check the room heading and selector show “123”. As the owner, rename it to “Наша оселя”, reload the page, and confirm the heading, selector, and profile list still show the saved name. Try a name longer than 12 characters in both forms and check the validation message.
 2. Open Members and check the signed-in name/email and “ЦЕ ВИ”. Reload: the room and identity must persist.
 3. Copy the invite link. Open it in another browser profile/private window; register or log in as a second user. The invitation survives authentication; preview and join it.
 4. Reload the first user's room to see both members. Repeat joining the same code: no duplicate membership.

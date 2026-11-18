@@ -1,6 +1,6 @@
 # Roomie infrastructure
 
-The original SQLite and Caddy Compose stack is available alongside the Frankfurt serverless configuration. Follow the AWS commands only after deployment approval.
+Roomie runs on the Frankfurt serverless stack. GitHub Actions releases application code to the existing infrastructure. The SQLite and Caddy Compose stack is available for local development and testing.
 
 ## Local and legacy Compose
 
@@ -17,7 +17,7 @@ docker compose cp backend:/data/backup.db ./roomie-backup.db
 
 Store the backup securely. The optional PostgreSQL service uses a separate volume and is stopped with `docker compose -f infra/compose.postgres.yaml down` from the root.
 
-## AWS architecture and database access
+## Production architecture and database access
 
 CloudFront serves the private S3 bucket through Origin Access Control. Its frontend function maps direct invite URLs to the Vite HTML. HTTPS `/api` and `/api/*` go to API Gateway HTTP API with all viewer headers except Host, including Authorization. The API behaviors disable edge caching and send `Cache-Control: no-store` to clients. The bare `/api` path receives the gateway’s unmapped-route response. API Gateway invokes Mangum with v2 events. Lambda concurrency is capped at 10, API throttling is set to 10 requests per second with a burst of 15, and log retention is seven days. The API Gateway URL also accepts requests and applies the same application authorization and stage throttles.
 
@@ -27,23 +27,19 @@ Aurora PostgreSQL uses one private Serverless v2 writer, encrypted storage, seve
 
 Lambda supplies temporary execution-role credentials to boto3. Each physical PostgreSQL connection is opened with a locally signed, 15-minute IAM authentication token for `roomie_app`. Signing needs no outbound STS or RDS API request. The database connection uses the private writer's IPv4 endpoint and verifies its TLS certificate and hostname against the RDS CA bundle. SQLAlchemy uses `NullPool`, so returning a connection closes it. The Lambda role reads only the JWT secret, and the Data API bootstrap uses a separate administrator secret. [Lambda credential provider](https://docs.aws.amazon.com/lambda/latest/dg/permissions-source-function-arn.html) · [RDS IAM authentication](https://docs.aws.amazon.com/lambda/latest/dg/example_serverless_connect_RDS_Lambda_section.html)
 
-Both Lambda subnets have IPv4 and IPv6 CIDRs. VPC DNS is enabled, and `::/0` uses an egress-only gateway. The Lambda security group permits IPv6 TCP/443 and private TCP/5432 to the database security group. Google Auth retrieves certificates over verified HTTPS from `https://www.googleapis.com/oauth2/v1/certs`. boto3 is pinned to the documented Frankfurt dual-stack Secrets Manager endpoint `https://secretsmanager.eu-central-1.amazonaws.com`. Both hostnames returned publicly resolvable AAAA records. The SDK-generated `secretsmanager.eu-central-1.api.aws` hostname returned NXDOMAIN during preflight. The local machine could not establish native IPv6, so the Lambda HTTPS path remains a live test. [Lambda IPv6 requirements](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html) · [Secrets Manager endpoints](https://docs.aws.amazon.com/secretsmanager/latest/userguide/asm_access.html) · [Google ID token verification](https://developers.google.com/identity/sign-in/web/backend-auth)
+Both Lambda subnets have IPv4 and IPv6 CIDRs. VPC DNS is enabled, and `::/0` uses an egress-only gateway. The Lambda security group permits IPv6 TCP/443 to Google’s public signing-key endpoint and Frankfurt Secrets Manager, and private TCP/5432 to the database security group. The SDK uses the documented Frankfurt endpoint, `https://secretsmanager.eu-central-1.amazonaws.com`. [Lambda IPv6 requirements](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html) · [Secrets Manager endpoints](https://docs.aws.amazon.com/secretsmanager/latest/userguide/asm_access.html) · [Google ID token verification](https://developers.google.com/identity/sign-in/web/backend-auth)
 
-After provisioning is approved, invoke health on a fresh Lambda environment to exercise Secrets Manager. Then test real Google sign-in and linking to exercise Google certificate retrieval, and authenticate against the database to verify IAM login and TLS. Verify auto-pause with the `ServerlessDatabaseCapacity` metric, then test read recovery after a five-minute idle interval and after a deep pause. During the pause test, use the health endpoint for availability monitoring and keep authenticated tabs closed.
+### Schema changes on the deployed stack
 
-### RDS Data API assessment
+Application queries use private psycopg connections. RDS Data API is reserved for the operator to submit reviewed Alembic SQL using the separate database administrator secret. GitHub Actions does not run production migrations.
 
-The published `sqlalchemy-aurora-data-api` dialect has an open SQLAlchemy 2.0 compatibility issue. Roomie uses SQLAlchemy 2.x `Session` and `select()` semantics. It also needs generated IDs before dependent inserts, bulk operations and accurate update row counts, SQLSTATE/integrity error handling, repeatable-read snapshots, and locks that stay in the same transaction until commit or rollback. The PostgreSQL Data API does not supply `generatedFields` and requires SQL `RETURNING` for generated keys. Its explicit transaction IDs, unsupported array binds and result-size limits add separate compatibility requirements. A psycopg connection speaks the PostgreSQL wire protocol. [Dialect issue](https://github.com/cloud-utils/sqlalchemy-aurora-data-api/issues/43) · [ExecuteStatement](https://docs.aws.amazon.com/rdsdataservice/latest/APIReference/API_ExecuteStatement.html) · [AWS Data API troubleshooting](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.troubleshooting.html)
-
-An offline smoke test with dialect 0.5.0, SQLAlchemy 2.0.46 and a fake Data API confirmed simple ORM `INSERT … RETURNING`, generated ID extraction, room lock SQL, and basic commit and rollback calls. The repeatable-read path sent a SQL `COMMIT` inside the active Data API transaction ID and reused that ID for the next query. SQLAlchemy’s session-level isolation setup cannot be assumed to survive Data API transaction boundaries. Concurrent requests and transaction behavior must be proven against Aurora before adopting this dialect.
-
-The private psycopg runtime is the supported implementation here. Existing tests exercise generated IDs, commit/rollback, and concurrent joins, chore changes and financial changes against PostgreSQL. The Data API is enabled for reviewed Alembic SQL via an explicit administrative command. Before adopting a runtime Data API dialect, run the same suites against a real Aurora test cluster, including connection resume and verification that failed requests roll back all rows and release locks. Neither the live Data API nor the Lambda IPv6 path has been validated here. [Lambda dual-stack configuration](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html) · [Secrets Manager IPv6](https://docs.aws.amazon.com/secretsmanager/latest/userguide/ip-access.html)
+Room creation and renaming use the existing `rooms.number VARCHAR(12)` column and require no schema change.
 
 ## Google Identity Services
 
 In Google Cloud, configure the OAuth consent screen and create or reuse a **Web application** OAuth client. For a testing consent screen, add the appropriate test users. Put the same public client ID in Terraform's `google_client_id` and the Vite build's `VITE_GOOGLE_CLIENT_ID`. Add `http://localhost:8443` for local testing and the exact `site_url` HTTPS origin after Terraform creates the distribution. Origins contain no path. The GIS JavaScript popup flow needs no redirect URI or client secret. If the assigned CloudFront hostname cannot be registered for the chosen Google project, use a domain you control, an ACM certificate in `us-east-1`, and update the CloudFront alias and OAuth origin as a separate approved change. Verify login and explicit linking in a real browser.
 
-## First AWS deployment after approval
+## Bootstrap a separate AWS stack after approval
 
 Use AWS CLI credentials with permission to create the listed resources, upload S3 objects, invalidate CloudFront, write the JWT secret, and run the Data API transaction against the Aurora cluster and its managed administrator secret. Use a dedicated AWS account/profile where practical. Terraform stores its state locally by default. Use `umask 077` for local artifacts and keep the state and saved plans protected and backed up, or configure an encrypted state backend with locking before team use. Review the saved plan and monthly estimates before requesting provisioning approval.
 
@@ -109,7 +105,7 @@ Use AWS CLI credentials with permission to create the listed resources, upload S
 
 ## GitHub Actions CI/CD
 
-Use these one-time steps for the **existing** Frankfurt stack and GitHub repository `ania-liuklian/roomie_app`. The workflow releases app code and frontend files. Manage infrastructure and reviewed schema changes separately.
+Automatic production deployment from `main` is enabled for `ania-liuklian/roomie_app`. The workflow releases app code and frontend files. Use the setup steps below when restoring or replacing the integration. Manage infrastructure and reviewed schema changes separately.
 
 ### 1. Confirm the existing AWS targets
 
@@ -187,7 +183,7 @@ In the AWS Console, select the production account. In **Lambda → Functions**, 
    | `ROOMIE_AWS_ACCOUNT_ID` | The 12-digit AWS account ID, used to verify assumed credentials |
    | `ROOMIE_LAMBDA_FUNCTION` | The existing unqualified Lambda function name |
    | `ROOMIE_FRONTEND_BUCKET` | The bucket name, without `s3://` |
-   | `ROOMIE_DISTRIBUTION_ID` | The existing CloudFront distribution ID |
+   | `ROOMIE_DISTRIBUTION_ID` | The bare CloudFront distribution ID, without quotes, whitespace, ARN, or URL |
    | `ROOMIE_SITE_URL` | The public HTTPS origin, without a path |
 
 ### 4. Test a manual release before enabling automatic releases
@@ -218,7 +214,7 @@ In the AWS Console, select the production account. In **Lambda → Functions**, 
 
 ## Monthly cost review
 
-**Recommendation:** Use the prepared serverless stack for light, intermittent university traffic. CloudFront and the HTTP API stay publicly reachable around the clock, and Aurora can pause during quiet periods. Budget for a slower first database action after a long pause. If the class needs predictable response times at all hours or measured database usage consistently exceeds roughly 100–125 ACU-hours per month, reprice the single-instance option. EC2 requires OS patching, backups, and recovery from instance or Availability Zone failures.
+**Recommendation:** The deployed serverless stack is sized for light, intermittent university traffic. CloudFront and the HTTP API stay publicly reachable around the clock, and Aurora can pause during quiet periods. Budget for a slower first database action after a long pause. If the class needs predictable response times at all hours or measured database usage consistently exceeds roughly 100–125 ACU-hours per month, reprice the single-instance option. EC2 requires OS patching, backups, and recovery from instance or Availability Zone failures.
 
 Estimates are in USD for 730 hours in Frankfurt, based on public rates reviewed on November 17, 2026. They exclude VAT, credits, free allowances, and custom domain registration. The EC2 comparison uses an On-Demand Linux Arm `t4g.small` with Caddy, the existing SQLite deployment, one public IPv4 address for broad client compatibility, a 20 GB gp3 volume, and 10 GB of incremental snapshot storage. It assumes an existing DNS name and no sustained CPU credit overage. [AWS Frankfurt RDS price catalog](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/eu-central-1/index.json) · [AWS Frankfurt EC2 price catalog](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/eu-central-1/index.json) · [Public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
 
