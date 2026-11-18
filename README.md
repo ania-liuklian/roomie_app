@@ -71,3 +71,7 @@ The PostgreSQL tests create a uniquely named schema per test, apply Alembic, and
 The Frankfurt Terraform configuration and manual runbook are in [infra/README.md](infra/README.md). CloudFront serves the private S3 frontend and sends uncached API requests to API Gateway and FastAPI on Lambda. The prepared runtime uses private PostgreSQL connections to auto-pausing Aurora Serverless v2. The RDS Data API is enabled for explicit schema administration. The original Docker Compose deployment remains available.
 
 See the [monthly cost comparison](infra/README.md#monthly-cost-review) for idle, light, and moderate traffic estimates and the single-instance EC2 alternative.
+
+### GitHub Actions deployment
+
+Pull requests to `main` run SQLite and PostgreSQL integration tests, frontend checks, and credential-free Terraform validation. Pushes to `main` rerun those checks before releasing the Lambda code and frontend to the existing Frankfurt stack. Automatic releases are opt-in. Follow the [CI/CD setup and rollback runbook](infra/README.md#github-actions-cicd) to configure GitHub OIDC and test the first manual release.
