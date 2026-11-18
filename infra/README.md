@@ -107,6 +107,115 @@ Use AWS CLI credentials with permission to create the listed resources, upload S
 
    Expect `{"status":"ok"}`, an API Gateway 404 for the unmapped `/api` route and a 401 for unauthenticated `/me`. API responses should send `Cache-Control: no-store`. In two separate browser sessions, verify that repeated authenticated `/me` requests return only the signed-in user’s profile. Verify signup and login with a test account, authenticated profile and avatars, direct invite navigation and joining, permission isolation, shopping deletion confirmation, chores and recurrence, expenses, balances and settlement confirmation, notifications, Google login and linking, and the donation banner target. Test again after an idle period, verify the writer resumes and ensure API responses carrying JWT-authenticated data are never shared across sessions.
 
+## GitHub Actions CI/CD
+
+Use these one-time steps for the **existing** Frankfurt stack and GitHub repository `ania-liuklian/roomie_app`. The workflow releases app code and frontend files. Manage infrastructure and reviewed schema changes separately.
+
+### 1. Confirm the existing AWS targets
+
+In the AWS Console, select the production account. In **Lambda → Functions**, select Frankfurt (`eu-central-1`) and copy the function name. Confirm that the HTTP API invokes the unqualified function, as in `api.tf`. In **S3 → General purpose buckets**, copy the private frontend bucket name. In **CloudFront → Distributions**, copy the distribution ID and its public HTTPS origin (the existing CloudFront domain or HTTPS alias). Use the account ID from the AWS Console account menu. The example policy assumes the bucket uses SSE-S3 as in the Roomie stack.
+
+### 2. Protect the repository and environment
+
+1. In **Settings → Actions → General**, enable Actions and allow the pinned actions from GitHub, HashiCorp and AWS used in these workflows. Keep default workflow token permissions read-only. The production job requests its own `id-token: write`.
+2. In **Settings → Environments**, create an environment named exactly `production`. Under **Deployment branches and tags**, choose **Selected branches and tags**, add a **Branch** rule for exactly `main`, and leave tags without any rule. Use a required reviewer for the first deployment if available. Keep the branch restriction in place when enabling automatic deploys. Confirm the repository plan supports environment deployment branch rules before configuring the AWS trust. [GitHub environment protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+3. In **Settings → Rules → Rulesets**, create or update an active branch ruleset targeting `main`. Require a pull request and review, block force pushes, and require these four checks from GitHub Actions after they have run on a PR: **Backend SQLite**, **Backend PostgreSQL**, **Frontend**, and **Terraform**. Limit bypass privileges. Review changes to `.github/workflows/` and `infra/deploy-release.sh` before merge. [GitHub ruleset settings](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+4. In **Settings → Secrets and variables → Actions → Variables**, add repository variables `VITE_GOOGLE_CLIENT_ID` (the public Google Web client ID used by Lambda) and `ROOMIE_AUTO_DEPLOY` (`false` initially). The build job reads the client ID before entering the production environment. No GitHub Actions secrets are needed.
+
+### 3. Create the OIDC provider and deployment role
+
+1. In **IAM → Identity providers**, reuse the provider for `token.actions.githubusercontent.com` if it already lists the audience `sts.amazonaws.com`. Otherwise choose **Add provider → OpenID Connect**, enter provider URL `https://token.actions.githubusercontent.com` and audience `sts.amazonaws.com`. If the provider already exists without the audience, add the audience to that provider. [GitHub OIDC setup for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
+2. In **IAM → Policies → Create policy → JSON**, paste this identity policy, replacing the four angle-bracket placeholders with the existing values from step 1. Name it `RoomieGitHubDeploy`. No permission to read application or database secrets is needed. [S3 action requirements](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html) · [Lambda update waiter](https://docs.aws.amazon.com/cli/latest/reference/lambda/wait/function-updated.html) · [CloudFront invalidation waiter](https://docs.aws.amazon.com/cli/latest/reference/cloudfront/wait/invalidation-completed.html)
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "UpdateExistingLambdaCode",
+         "Effect": "Allow",
+         "Action": ["lambda:GetFunctionConfiguration", "lambda:UpdateFunctionCode"],
+         "Resource": "arn:aws:lambda:eu-central-1:<AWS_ACCOUNT_ID>:function:<LAMBDA_FUNCTION_NAME>"
+       },
+       {
+         "Sid": "UploadFrontendObjects",
+         "Effect": "Allow",
+         "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+         "Resource": "arn:aws:s3:::<FRONTEND_BUCKET>/*",
+         "Condition": {"StringEquals": {"aws:ResourceAccount": "<AWS_ACCOUNT_ID>"}}
+       },
+       {
+         "Sid": "InvalidateExistingDistribution",
+         "Effect": "Allow",
+         "Action": ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"],
+         "Resource": "arn:aws:cloudfront::<AWS_ACCOUNT_ID>:distribution/<CLOUDFRONT_DISTRIBUTION_ID>"
+       }
+     ]
+   }
+   ```
+
+3. In **IAM → Roles → Create role**, choose **Custom trust policy**. Paste the following JSON with the production AWS account ID and attach only `RoomieGitHubDeploy`. Name the role `RoomieGitHubDeploy` and copy its ARN.
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Principal": {
+           "Federated": "arn:aws:iam::<AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+         },
+         "Action": "sts:AssumeRoleWithWebIdentity",
+         "Condition": {
+           "StringEquals": {
+             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+             "token.actions.githubusercontent.com:sub": "repo:ania-liuklian@246476250/roomie_app@1457854596:environment:production"
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+   The repository was created on November 14, 2026, after GitHub introduced immutable default OIDC subjects. The two numeric IDs are its public owner and repository IDs. The job's subject ends in `:environment:production` because it references that environment. The GitHub environment restricts the branch to `main`. Keep exact matches. If a repository-level subject template has been configured, check it under the repository's Actions OIDC settings, or inspect it with `gh api repos/ania-liuklian/roomie_app/actions/oidc/customization/sub`. Align any customized subject deliberately before using the trust policy. Never dump a raw OIDC token to diagnose a mismatch. [GitHub environment subjects and immutable repository IDs](https://docs.github.com/en/actions/reference/security/oidc)
+
+4. In **Settings → Environments → production → Environment variables**, add:
+
+   | Variable | Value |
+   |---|---|
+   | `ROOMIE_DEPLOY_ROLE_ARN` | The ARN of the dedicated IAM role |
+   | `ROOMIE_AWS_ACCOUNT_ID` | The 12-digit AWS account ID, used to verify assumed credentials |
+   | `ROOMIE_LAMBDA_FUNCTION` | The existing unqualified Lambda function name |
+   | `ROOMIE_FRONTEND_BUCKET` | The bucket name, without `s3://` |
+   | `ROOMIE_DISTRIBUTION_ID` | The existing CloudFront distribution ID |
+   | `ROOMIE_SITE_URL` | The public HTTPS origin, without a path |
+
+### 4. Test a manual release before enabling automatic releases
+
+1. Merge the workflows through a reviewed pull request with **ROOMIE_AUTO_DEPLOY=false**. The `main` run executes CI and skips packaging and deployment. Preserve the deployed Lambda ZIP and frontend files as a rollback point. If you don't have the original release archive, use the following with an authorized operator profile and the target values above. The operator needs read access to the existing function code and frontend bucket. The deployment role has narrower permissions. Run with shell tracing disabled so the temporary Lambda download URL stays out of logs.
+
+   ```sh
+   umask 077
+   export AWS_REGION=eu-central-1 AWS_DEFAULT_REGION=eu-central-1
+   roomie_backup="$(mktemp -d)"
+   roomie_zip_url="$(aws lambda get-function --function-name "$ROOMIE_LAMBDA_FUNCTION" --query 'Code.Location' --output text)"
+   curl --fail --silent --show-error --proto '=https' "$roomie_zip_url" -o "$roomie_backup/roomie-lambda.zip"
+   unset roomie_zip_url
+   aws s3 cp "s3://$ROOMIE_FRONTEND_BUCKET/" "$roomie_backup/frontend/" --recursive --only-show-errors
+   ```
+
+   Copy the resulting directory to secure, durable storage.
+2. In **Actions → Deploy Roomie → Run workflow**, select **main** and run it. Approve the production job if it requires a reviewer. This performs a real code release after tests pass. The job uploads fingerprinted assets, updates Lambda, waits for completion, and checks the public HTTPS health endpoint before publishing `index.html`. It waits for CloudFront invalidation of `/` and `/index.html`, then repeats the health check. Health requests use no credentials and do not query Aurora.
+3. Check the homepage and sign in with a test account in a browser. Confirm both sign-in and a database-backed room view. Once the manual release passes, set **ROOMIE_AUTO_DEPLOY=true**. Next merges to `main` release after all tests pass. Remove the optional environment reviewer if releases should run unattended. Keep the environment restricted to `main`. A superseded commit is skipped, and automatic and manual production jobs share one concurrency group. GitHub can replace an older pending deployment with a newer one and lets an active deployment finish.
+
+### Rollback and troubleshooting
+
+- **Normal rollback:** Open a PR that reverts the faulty application changes. Merge it after CI passes. If automatic releases are disabled, run **Deploy Roomie** on `main` after merging. CI retains release artifacts for 30 days, subject to the repository's retention limit. Save known-good releases separately when longer retention is needed.
+- **Urgent rollback:** Set `ROOMIE_AUTO_DEPLOY=false`, let any active production job finish and cancel queued jobs before using an authorized operator role. Download the previous successful run's artifact and extract `roomie-lambda.zip` and `frontend/` together. Export `ROOMIE_LAMBDA_FUNCTION`, `ROOMIE_FRONTEND_BUCKET`, `ROOMIE_DISTRIBUTION_ID`, and `ROOMIE_SITE_URL` using the values above, then run `bash infra/deploy-release.sh /path/to/extracted-release`. The script updates the existing function and publishes the archived frontend. It preserves old fingerprinted assets and does not change the schema. Keep the database schema and API compatible across releases.
+- **Failed deployment:** A failure before publishing `index.html` leaves the old HTML in place, although hashed files and a new Lambda ZIP might already be deployed. A failure after publishing HTML can leave both new artifacts live. Inspect the failed step and use the rollback procedure if needed. Coordinate operator uploads with GitHub's release queue. They do not share its concurrency lock.
+- **OIDC access denied:** Check the exact subject, issuer, audience, repository identity, environment name, branch rule and account ID. For an AWS API denial after authentication, check the scope of the resource ARN and confirm the bucket still uses SSE-S3. For a smoke failure, check the public origin and Lambda/API logs with an authorized operator account.
+- **Terraform ownership:** The infrastructure still references a local Lambda ZIP. Before a later infrastructure plan, check for a proposed Lambda code change and use the currently deployed archive if the infrastructure change should preserve that release. The deployment workflow never runs Terraform apply, destroy or schema migrations.
+
 ## Monthly cost review
 
 **Recommendation:** Use the prepared serverless stack for light, intermittent university traffic. CloudFront and the HTTP API stay publicly reachable around the clock, and Aurora can pause during quiet periods. Budget for a slower first database action after a long pause. If the class needs predictable response times at all hours or measured database usage consistently exceeds roughly 100–125 ACU-hours per month, reprice the single-instance option. EC2 requires OS patching, backups, and recovery from instance or Availability Zone failures.
@@ -144,6 +253,6 @@ Aurora awake time drives the estimate. A writer that stays at 0.5 ACU all month 
 
 ## Rollback and cleanup
 
-For an application rollback, restore the prior ZIP through Terraform and upload the archived frontend with the same public Google client ID and API base URL. Invalidate HTML after restoring it. Keep migrations forward-compatible where possible. If a schema change requires recovery, restore the snapshot to a separate cluster and test recovery before redirecting traffic. The SQLite Compose service can still be run from its original data volume, but new Aurora records require a separate data transfer to appear there.
+For an application rollback, use the [release rollback procedure](#rollback-and-troubleshooting) with the matching Lambda and frontend artifacts. Invalidate HTML after restoring it. Keep migrations forward-compatible where possible. If a schema change requires recovery, restore the snapshot to a separate cluster and test recovery before redirecting traffic. The SQLite Compose service can still be run from its original data volume, but new Aurora records require a separate data transfer to appear there.
 
 Before an approved teardown, confirm the AWS account and state, archive required data, choose a unique final snapshot identifier, and apply a reviewed plan with `protect_database = false`. Empty only the stack's frontend bucket after archiving releases. Review `terraform -chdir=infra plan -destroy -out=destroy.tfplan` before explicitly applying it. Confirm the distribution, Lambda, API, bucket and cluster were removed, then review any remaining final snapshots, retained backups, manually configured budgets and pending secret deletions. Retained snapshots continue to incur storage charges. Use `docker compose down` separately for local services and keep their volumes.
